@@ -1,0 +1,92 @@
+:root {
+  --bg: #111111;
+  --fg: #e6e6e6;
+  --muted: #9a9a9a;
+  --margin-x: 5vw;
+  --margin-y: 10vh;
+  --font: "IBM Plex Mono", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+}
+
+a {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--muted);
+}
+
+#shell {
+  position: relative;
+  height: 100%;
+  padding: var(--margin-y) var(--margin-x);
+}
+
+#top-nav,
+#bottom-nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  position: absolute;
+  right: var(--margin-x);
+}
+
+#top-nav {
+  top: calc(var(--margin-y) / 2);
+}
+
+#bottom-nav {
+  bottom: calc(var(--margin-y) / 2);
+}
+
+#art-container {
+  position: absolute;
+  left: var(--margin-x);
+  right: var(--margin-x);
+  top: var(--margin-y);
+  bottom: var(--margin-y);
+  display: grid;
+  place-items: center;
+}
+
+#panel {
+  position: absolute;
+  left: var(--margin-x);
+  right: var(--margin-x);
+  top: var(--margin-y);
+  bottom: var(--margin-y);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+#panel a {
+  align-self: flex-start;
+}
+
+.art-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
