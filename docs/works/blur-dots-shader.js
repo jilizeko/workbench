@@ -12,6 +12,10 @@ let lastDotTime = 0;
 let dot = { x: 0.5, y: 0.5 };
 let onResize = null;
 
+const DOT_INTERVAL_MS = 1;
+const DOT_RADIUS = 0.04;
+const BLUR_RADIUS = 2;
+
 const vertexSource = `
   attribute vec2 a_position;
   varying vec2 v_uv;
@@ -28,22 +32,27 @@ const updateSource = `
   uniform sampler2D u_texture;
   uniform vec2 u_texel;
   uniform vec2 u_dot;
+  uniform float u_aspect;
+  uniform float u_dotRadius;
+  uniform float u_blurRadius;
   uniform float u_addDot;
   varying vec2 v_uv;
 
   vec4 blurSample() {
     vec4 sum = texture2D(u_texture, v_uv) * 0.72;
-    sum += texture2D(u_texture, v_uv + vec2(u_texel.x, 0.0)) * 0.07;
-    sum += texture2D(u_texture, v_uv - vec2(u_texel.x, 0.0)) * 0.07;
-    sum += texture2D(u_texture, v_uv + vec2(0.0, u_texel.y)) * 0.07;
-    sum += texture2D(u_texture, v_uv - vec2(0.0, u_texel.y)) * 0.07;
+    vec2 offset = u_texel * u_blurRadius;
+    sum += texture2D(u_texture, v_uv + vec2(offset.x, 0.0)) * 0.07;
+    sum += texture2D(u_texture, v_uv - vec2(offset.x, 0.0)) * 0.07;
+    sum += texture2D(u_texture, v_uv + vec2(0.0, offset.y)) * 0.07;
+    sum += texture2D(u_texture, v_uv - vec2(0.0, offset.y)) * 0.07;
     return sum;
   }
 
   void main() {
-    vec4 base = blurSample() * 0.995;
-    float d = distance(v_uv, u_dot);
-    float dot = smoothstep(0.03, 0.0, d) * u_addDot;
+    vec4 base = max(blurSample() * 0.995 - vec4(0.002), 0.0);
+    vec2 diff = (v_uv - u_dot) * vec2(u_aspect, 1.0);
+    float d = length(diff);
+    float dot = smoothstep(u_dotRadius, 0.0, d) * u_addDot;
     vec3 color = base.rgb + vec3(0.9) * dot;
     gl_FragColor = vec4(color, 1.0);
   }
@@ -165,7 +174,7 @@ function updateTextures() {
 
 function drawFrame(time) {
   const elapsed = time - startTime;
-  const addDot = elapsed - lastDotTime >= 1000 ? 1 : 0;
+  const addDot = elapsed - lastDotTime >= DOT_INTERVAL_MS ? 1 : 0;
 
   if (addDot) {
     lastDotTime = elapsed;
@@ -194,6 +203,12 @@ function drawFrame(time) {
     1 / canvas.height
   );
   gl.uniform2f(gl.getUniformLocation(programUpdate, "u_dot"), dot.x, dot.y);
+  gl.uniform1f(
+    gl.getUniformLocation(programUpdate, "u_aspect"),
+    canvas.width / canvas.height
+  );
+  gl.uniform1f(gl.getUniformLocation(programUpdate, "u_dotRadius"), DOT_RADIUS);
+  gl.uniform1f(gl.getUniformLocation(programUpdate, "u_blurRadius"), BLUR_RADIUS);
   gl.uniform1f(gl.getUniformLocation(programUpdate, "u_addDot"), addDot);
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

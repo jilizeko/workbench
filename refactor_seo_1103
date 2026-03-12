@@ -1,0 +1,285 @@
+# SEO Implementation Plan — Generative Art Website
+
+This document describes the **current refactoring stage** required to prepare the website for proper search engine indexing while preserving the existing architecture.
+
+The site architecture remains:
+
+shell + registry + runtime-loaded artwork modules
+
+Key design rule:
+The **registry (registry.js) remains the single source of truth** for all artworks. Runtime navigation, SEO pages, sitemap generation and automation will all derive from it.
+
+Goal:
+Expose crawlable pages for each artwork without breaking the minimal JS runtime architecture, and keep the `/all/` page as an indexable list only (no extra descriptions).
+
+URL style rule:
+Folder pages use a trailing slash (`/all/`, `/credits/`). Artwork pages are files (`/works/<slug>.html`).
+
+---
+
+# Task 1 — Replace hash routing with crawlable URLs
+
+## Current state
+
+URLs use hash routing:
+
+```
+#/work/blur-dots
+```
+
+Search engines typically treat this as a single page.
+
+## Target result
+
+Each artwork must have a **real crawlable URL**.
+
+Preferred structure:
+
+```
+/works/blur-dots.html
+/works/random-walk.html
+/works/looped-curve.html
+```
+
+## Implementation principle
+
+The site should move to **path-based routing as the primary routing model**. The shared runtime must resolve the current artwork or static section directly from `location.pathname`.
+
+Outcome:
+Search engines can directly request artwork pages.
+
+---
+
+# Task 2 — Introduce SEO wrapper pages for artworks
+
+Create thin HTML wrapper pages for each artwork.
+
+Example structure:
+
+```
+/works/blur-dots.html
+/works/random-walk.html
+/works/looped-curve.html
+```
+
+These pages act as **SEO entry points** while still using the same runtime shell and the same path-based routing model.
+
+## Implementation principle
+
+All wrapper pages should be based on **one shared template structure**. The pages differ only by a small set of variables:
+
+• slug
+• title
+• description
+• OpenGraph metadata
+
+Everything else should remain identical across pages.
+
+This allows the site to:
+
+• avoid maintaining many different HTML files
+• keep the runtime architecture consistent
+• unify routing, SEO pages, sitemap and internal links around one URL model
+• prepare the project for future automatic page generation
+
+## Responsibilities of each wrapper page
+
+Each page must:
+
+• declare SEO metadata
+• load the main runtime shell
+• expose the artwork under a real page path
+
+The shared runtime reads the current slug from `location.pathname` and then loads the correct artwork module from `registry.js`.
+
+## Practical rule
+
+SEO wrapper pages **do not render the artwork themselves**. They only declare page metadata and start the shared runtime.
+
+Outcome:
+Each artwork has a standalone crawlable page, the runtime resolves content from real paths, and duplication of HTML is minimized.
+
+---
+
+# Task 2.1 — Unify wrapper pages by template (manual now, auto later)
+
+All SEO wrapper pages should share one minimal HTML template. For this stage, they can be copied manually, changing only:
+
+• slug
+• title
+• description
+• OpenGraph metadata
+
+This keeps the HTML consistent and prepares the project for registry-driven generation in the next stage.
+
+---
+
+# Routing Contract
+
+The site uses **path-based routing**. URLs represent real pages that can be requested directly by browsers and search engines.
+
+## Canonical routes
+
+```
+/                  → start page (loads first or featured artwork)
+/works/<slug>.html → specific artwork
+/all/              → list of all artworks (indexable list only)
+/credits/          → credits and project information
+```
+
+## Runtime routing rules
+
+The shared runtime (`app.js`) must determine the current route using:
+
+```
+location.pathname
+```
+
+Behavior:
+
+• `/` loads the first or featured artwork from `registry.js`
+• `/works/<slug>.html` loads the artwork module associated with that slug
+• `/all/` renders the list of artworks only (no descriptions)
+• `/credits/` renders the credits panel
+
+## File structure
+
+SEO wrapper pages correspond to these paths:
+
+```
+docs/index.html
+
+docs/all/index.html
+
+docs/credits/index.html
+
+docs/works/<slug>.html
+```
+
+The wrapper pages exist only as **entry points**. Rendering is handled by the shared runtime.
+
+Outcome:
+Routing, SEO pages, internal navigation and sitemap generation all use the same URL model.
+
+---
+
+# Task 3 — Add SEO metadata to artwork pages
+
+Each artwork wrapper page must include unique metadata in `<head>`.
+
+Required tags:
+
+• `<title>`
+• `<meta name="description">`
+
+Example target:
+
+Title:
+
+"Blur Dots Shader — Generative Art"
+
+Description:
+
+"Interactive generative artwork where random dots accumulate with soft blur trails, built with WebGL and JavaScript."
+
+Outcome:
+Search engines display meaningful titles and descriptions in results.
+
+---
+
+# Task 4 — Keep `/all/` page as indexable list only
+
+The `/all/` page must render only a list of links to artworks (no extra descriptions or paragraphs).
+
+Outcome:
+The page is indexable and stays minimal per UI rules.
+
+---
+
+# Task 5 — Add OpenGraph metadata
+
+Add social sharing metadata to artwork pages.
+
+Required tags:
+
+• `og:title`
+• `og:description`
+• `og:image`
+
+Outcome:
+When links are shared in social networks (Telegram, Discord, Twitter, etc.), a preview card appears with title, description and image.
+
+---
+
+# Task 6 — Create sitemap.xml
+
+Add a sitemap listing all crawlable pages.
+
+Target file:
+
+```
+/sitemap.xml
+```
+
+Pages included:
+
+• homepage
+• artwork pages
+• credits page
+• all page (`/all/`)
+
+Important rule:
+The sitemap should eventually be **generated from registry.js**.
+
+Outcome:
+Search engines discover all pages quickly.
+
+---
+
+# Task 7 — Add robots.txt
+
+Create crawler configuration file.
+
+Target file:
+
+```
+/robots.txt
+```
+
+Minimal configuration:
+
+• allow crawling
+• reference sitemap location
+
+Outcome:
+Search engines understand crawl permissions and sitemap location.
+
+---
+
+# Result of This Refactoring Stage
+
+After completing these tasks the site will:
+
+• expose crawlable URLs for each artwork
+• use path-based routing as the primary routing model
+• keep the existing shell + registry + runtime architecture
+• provide SEO entry pages for artworks
+• include metadata for search engines
+• support social preview cards
+• expose a sitemap for search engines
+
+This establishes the **SEO foundation layer** on top of the existing generative-art runtime.
+
+---
+
+# Next Stage (separate document)
+
+Automation layer:
+
+Generate
+
+• SEO pages
+• sitemap
+• /all/ list
+
+from the artwork registry automatically.
