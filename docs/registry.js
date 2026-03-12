@@ -28,5 +28,15 @@ export const works = [
       date: "2026-03-10",
       description: "Continuous Lissajous-like loop."
     }
+  },
+  {
+    slug: "masked-time-dots",
+    title: "Masked Time Dots",
+    order: 4,
+    script: "./works/masked-time-dots.js",
+    meta: {
+      date: "2026-03-12",
+      description: "Time digits as a mask of animated circles."
+    }
   }
 ];
