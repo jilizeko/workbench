@@ -8,7 +8,7 @@ const navNext = document.getElementById("nav-next");
 const navRandom = document.getElementById("nav-random");
 const deepLink = document.getElementById("deep-link");
 
-const orderedWorks = [...works].sort((a, b) => a.order - b.order);
+const orderedWorks = [...works].sort((a, b) => b.order - a.order);
 let currentWork = null;
 let currentModule = null;
 
