@@ -2,6 +2,8 @@ import { works } from "./registry.js";
 
 const artContainer = document.getElementById("art-container");
 const panel = document.getElementById("panel");
+const navCredits = document.getElementById("nav-credits");
+const navAll = document.getElementById("nav-all");
 const navNext = document.getElementById("nav-next");
 const navRandom = document.getElementById("nav-random");
 const deepLink = document.getElementById("deep-link");
@@ -9,6 +11,69 @@ const deepLink = document.getElementById("deep-link");
 const orderedWorks = [...works].sort((a, b) => a.order - b.order);
 let currentWork = null;
 let currentModule = null;
+
+const basePath = getBasePath();
+
+function getBasePath() {
+  const path = window.location.pathname;
+  const markers = ["/works/", "/all/", "/credits/"];
+
+  for (const marker of markers) {
+    const index = path.indexOf(marker);
+    if (index !== -1) {
+      return path.slice(0, index + 1);
+    }
+  }
+
+  if (path.endsWith("/index.html")) {
+    return path.slice(0, path.lastIndexOf("/") + 1);
+  }
+
+  if (path.endsWith("/")) {
+    return path;
+  }
+
+  return path.slice(0, path.lastIndexOf("/") + 1);
+}
+
+function withBase(relativePath) {
+  if (!relativePath) return basePath;
+  return `${basePath}${relativePath}`;
+}
+
+function getHomeUrl() {
+  return withBase("");
+}
+
+function getAllUrl() {
+  return withBase("all/");
+}
+
+function getCreditsUrl() {
+  return withBase("credits/");
+}
+
+function getWorkUrl(slug) {
+  return withBase(`works/${slug}.html`);
+}
+
+function getRoutePath() {
+  let path = window.location.pathname;
+
+  if (path.startsWith(basePath)) {
+    path = `/${path.slice(basePath.length)}`;
+  }
+
+  if (path === "/" || path === "/index.html") {
+    return "/";
+  }
+
+  if (path.endsWith("/index.html")) {
+    return path.replace(/\/index\.html$/, "/");
+  }
+
+  return path;
+}
 
 function getWorkBySlug(slug) {
   return orderedWorks.find((work) => work.slug === slug) || null;
@@ -38,9 +103,9 @@ function updateNav(work) {
   const nextWork = getNextWork(work);
   const randomWork = getRandomWork(work);
 
-  navNext.href = nextWork ? `#/work/${nextWork.slug}` : "#/";
-  navRandom.href = randomWork ? `#/work/${randomWork.slug}` : "#/";
-  deepLink.href = work ? `#/work/${work.slug}` : "#/";
+  navNext.href = nextWork ? getWorkUrl(nextWork.slug) : getHomeUrl();
+  navRandom.href = randomWork ? getWorkUrl(randomWork.slug) : getHomeUrl();
+  deepLink.href = work ? getWorkUrl(work.slug) : getHomeUrl();
 }
 
 function clearPanel() {
@@ -62,7 +127,7 @@ function renderAllPosts() {
   panel.innerHTML = "";
   orderedWorks.forEach((work) => {
     const link = document.createElement("a");
-    link.href = `#/work/${work.slug}`;
+    link.href = getWorkUrl(work.slug);
     link.textContent = work.title;
     panel.appendChild(link);
   });
@@ -124,9 +189,9 @@ async function loadWork(work) {
 }
 
 function route() {
-  const hash = window.location.hash || "#/";
+  const path = getRoutePath();
 
-  if (hash.startsWith("#/all")) {
+  if (path.startsWith("/all")) {
     if (currentModule?.destroy) currentModule.destroy();
     currentModule = null;
     currentWork = null;
@@ -134,7 +199,7 @@ function route() {
     return;
   }
 
-  if (hash.startsWith("#/credits")) {
+  if (path.startsWith("/credits")) {
     if (currentModule?.destroy) currentModule.destroy();
     currentModule = null;
     currentWork = null;
@@ -142,8 +207,8 @@ function route() {
     return;
   }
 
-  if (hash.startsWith("#/work/")) {
-    const slug = hash.replace("#/work/", "").trim();
+  if (path.startsWith("/works/")) {
+    const slug = path.replace("/works/", "").replace(".html", "").trim();
     const work = getWorkBySlug(slug);
     if (work) {
       clearPanel();
@@ -161,5 +226,29 @@ function route() {
   }
 }
 
-window.addEventListener("hashchange", route);
+function handleLinkClick(event) {
+  const link = event.target.closest("a");
+  if (!link) return;
+  if (link.target || link.hasAttribute("download")) return;
+  if (event.defaultPrevented) return;
+  if (event.button !== 0) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+  const url = new URL(link.href, window.location.origin);
+  if (url.origin !== window.location.origin) return;
+  if (!url.pathname.startsWith(basePath)) return;
+
+  event.preventDefault();
+  window.history.pushState({}, "", url.pathname);
+  route();
+}
+
+function initNavigation() {
+  navCredits.href = getCreditsUrl();
+  navAll.href = getAllUrl();
+}
+
+window.addEventListener("popstate", route);
+document.addEventListener("click", handleLinkClick);
+initNavigation();
 route();

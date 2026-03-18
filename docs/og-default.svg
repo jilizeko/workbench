@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#111111" />
+  <rect x="80" y="80" width="1040" height="470" fill="#1b1b1b" stroke="#2a2a2a" stroke-width="2" />
+  <text x="120" y="210" fill="#e6e6e6" font-family="Courier New, monospace" font-size="56">GenArtTable</text>
+  <text x="120" y="290" fill="#9a9a9a" font-family="Courier New, monospace" font-size="26">generative art catalog</text>
+  <text x="120" y="370" fill="#9a9a9a" font-family="Courier New, monospace" font-size="22">html / css / js</text>
+</svg>

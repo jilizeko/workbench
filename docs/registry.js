@@ -38,5 +38,15 @@ export const works = [
       date: "2026-03-12",
       description: "Time digits as a mask of animated circles."
     }
+  },
+  {
+    slug: "spiral-time-dial",
+    title: "Spiral Time Dial",
+    order: 5,
+    script: "./works/spiral-time-dial.js",
+    meta: {
+      date: "2026-03-18",
+      description: "Spiraling clock dial with depth, ticks, and particles."
+    }
   }
 ];
