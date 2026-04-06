@@ -35,6 +35,7 @@ Generate the JavaScript module that implements the approved artwork concept usin
    - add a window `resize` listener in `init()`
    - recompute canvas size and internal buffers
    - remove the listener in `destroy()`
+   - Note: `app.js` attaches a `ResizeObserver` on `#art-container` that dispatches `window.resize`, so modules automatically resize on fullscreen enter/exit without extra code.
 6. Export the lifecycle functions.
 7. Add tunable parameters where useful (examples: particle count, noise scale, speed, trail length).
 

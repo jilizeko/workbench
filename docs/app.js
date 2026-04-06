@@ -252,3 +252,62 @@ window.addEventListener("popstate", route);
 document.addEventListener("click", handleLinkClick);
 initNavigation();
 route();
+
+/* ── Fullscreen ── */
+const fsBtn = document.getElementById("fullscreen-btn");
+const fsExpand = document.getElementById("fs-expand");
+const fsCompress = document.getElementById("fs-compress");
+const shell = document.getElementById("shell");
+let fsHideTimer = null;
+
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+function updateFsIcon() {
+  const fs = isFullscreen();
+  fsExpand.style.display = fs ? "none" : "";
+  fsCompress.style.display = fs ? "" : "none";
+}
+
+function showFsBtn() {
+  fsBtn.classList.remove("hidden");
+  clearTimeout(fsHideTimer);
+  if (isFullscreen()) {
+    fsHideTimer = setTimeout(() => fsBtn.classList.add("hidden"), 2000);
+  }
+}
+
+function onFsActivity() {
+  if (isFullscreen()) showFsBtn();
+}
+
+fsBtn.addEventListener("click", () => {
+  if (isFullscreen()) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    (shell.requestFullscreen || shell.webkitRequestFullscreen).call(shell);
+  }
+});
+
+document.addEventListener("fullscreenchange", () => {
+  updateFsIcon();
+  if (isFullscreen()) {
+    showFsBtn();
+  } else {
+    clearTimeout(fsHideTimer);
+    fsBtn.classList.remove("hidden");
+  }
+});
+document.addEventListener("webkitfullscreenchange", () => {
+  document.dispatchEvent(new Event("fullscreenchange"));
+});
+
+/* Notify art modules when the container actually changes size */
+new ResizeObserver(() => {
+  window.dispatchEvent(new Event("resize"));
+}).observe(artContainer);
+
+document.addEventListener("mousemove", onFsActivity);
+document.addEventListener("pointerdown", onFsActivity);
+document.addEventListener("keydown", onFsActivity);

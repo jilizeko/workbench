@@ -26,6 +26,17 @@
       <main id="art-container" aria-live="polite"></main>
       <section id="panel" hidden></section>
 
+      <button id="fullscreen-btn" aria-label="Toggle fullscreen">
+        <svg id="fs-expand" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="10,2 14,2 14,6" /><line x1="14" y1="2" x2="9" y2="7" />
+          <polyline points="6,14 2,14 2,10" /><line x1="2" y1="14" x2="7" y2="9" />
+        </svg>
+        <svg id="fs-compress" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" style="display:none">
+          <polyline points="14,6 10,6 10,2" /><line x1="10" y1="6" x2="15" y2="1" />
+          <polyline points="2,10 6,10 6,14" /><line x1="6" y1="10" x2="1" y2="15" />
+        </svg>
+      </button>
+
       <footer id="bottom-nav">
         <a href="./" id="nav-next">next</a>
         <a href="./" id="nav-random">random</a>

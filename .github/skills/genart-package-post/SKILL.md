@@ -30,6 +30,7 @@ Convert a finished artwork module into a complete website entry aligned with the
    - OpenGraph metadata (`og:title`, `og:description`, `og:image`)
    - Use `og-default.svg` when no artwork-specific image is available.
    - link to shared CSS and runtime `app.js`
+   - fullscreen toggle button between `<section id="panel">` and `<footer id="bottom-nav">` (copy from `docs/index.html`)
 4. Keep wrapper pages minimal: they load the shared runtime and do not render the artwork directly.
 5. Confirm `/all/` remains list-only; links are generated from `registry.js` at runtime (no manual descriptions).
 6. Add the new page to `docs/sitemap.xml`.
