@@ -14,7 +14,7 @@ let spawnCarry = 0;
 let spawnCarryCenter = 0;
 
 const CONFIG = {
-  BG: "#111111",
+  BG: "#2b2b2b",
   FOG_DEPTH_RATIO: 0.9,
   FOG_FAR_DEPTH_RATIO: -0.9,
   FOG_NEAR_CURVE: .6,
@@ -36,11 +36,13 @@ const CONFIG = {
   HAND_WIDTH_RATIO: 0.01,
   SECOND_HAND_LENGTH_RATIO: 0.37,
   SECOND_HAND_WIDTH_RATIO: 0.002,
-  PARTICLE_RATE: 60,
+  PARTICLE_RATE: 10,
   PARTICLE_SPEED_RATIO: 0.0745,
   PARTICLE_TURN_RATE: .515,
   PARTICLE_SIZE_RATIO: 0.009,
   PARTICLE_MAX_LIFE: 180,
+  PARTICLE_NEAR_DRIFT_FACTOR: 1.2,
+  PARTICLE_FADEIN_TIME: 0.5,
   VIGNETTE_INNER: 0.,
   VIGNETTE_OUTER: 10.,
   VIGNETTE_DISSOLVE_START: 0.,
@@ -52,7 +54,7 @@ const CONFIG = {
   TIME_ANGLE_OFFSET: .75,//-Math.PI * 4/12,
   HOUR_INDEX_OFFSET: 3,
   CENTER_EMITTER_ENABLED: true,
-  CENTER_EMITTER_RATE: 15,
+  CENTER_EMITTER_RATE: 5,
   CENTER_EMITTER_Z_OFFSET_RATIO: .9,
   CENTER_EMITTER_PREWARM: true,
   CENTER_EMITTER_SIZE_X_RATIO: 1,
@@ -328,6 +330,17 @@ function updateParticles(dt) {
     p.y += p.vy * dt;
     p.z += p.vz * dt;
 
+    const nearStart = -derived.focal * 0.3;
+    if (p.z < nearStart) {
+      const nearness = clamp((nearStart - p.z) / (derived.focal * 0.65), 0, 1);
+      const drift = nearness * CONFIG.PARTICLE_NEAR_DRIFT_FACTOR * derived.particleSpeed * dt;
+      const lateralLen = Math.hypot(p.vx, p.vy);
+      if (lateralLen > 1e-6) {
+        p.x += (p.vx / lateralLen) * drift;
+        p.y += (p.vy / lateralLen) * drift;
+      }
+    }
+
     if (p.life < CONFIG.PARTICLE_MAX_LIFE && p.z > -derived.focal * 0.95) {
       alive.push(p);
     }
@@ -335,20 +348,40 @@ function updateParticles(dt) {
   particles = alive;
 }
 
-function prewarmCenterEmitter() {
-  if (!CONFIG.CENTER_EMITTER_ENABLED || !CONFIG.CENTER_EMITTER_PREWARM) return;
+function prewarmParticles() {
   particles = [];
   const duration = Math.max(0, CONFIG.PARTICLE_MAX_LIFE);
   const step = 1 / 60;
-  let carry = 0;
+  let carryCenter = 0;
+  let carrySecond = 0;
+  const nowMs = Date.now();
+  const doCenter = CONFIG.CENTER_EMITTER_ENABLED && CONFIG.CENTER_EMITTER_PREWARM;
 
   for (let t = 0; t < duration; t += step) {
-    carry += step * CONFIG.CENTER_EMITTER_RATE;
-    const count = Math.floor(carry);
-    carry -= count;
-    for (let i = 0; i < count; i += 1) {
-      spawnCenterParticle();
+    if (doCenter) {
+      carryCenter += step * CONFIG.CENTER_EMITTER_RATE;
+      const cc = Math.floor(carryCenter);
+      carryCenter -= cc;
+      for (let i = 0; i < cc; i += 1) {
+        spawnCenterParticle();
+      }
     }
+
+    const simDate = new Date(nowMs - (duration - t) * 1000);
+    const sec = simDate.getSeconds();
+    const ms = simDate.getMilliseconds();
+    const secondFrac = (sec + ms / 1000) / 60;
+    const secondAngle = angleFromFrac(secondFrac);
+    const ox = Math.sin(secondAngle) * derived.secondHandLength;
+    const oy = -Math.cos(secondAngle) * derived.secondHandLength;
+
+    carrySecond += step * CONFIG.PARTICLE_RATE;
+    const sc = Math.floor(carrySecond);
+    carrySecond -= sc;
+    for (let i = 0; i < sc; i += 1) {
+      spawnParticle(ox, oy);
+    }
+
     updateParticles(step);
   }
 }
@@ -478,7 +511,8 @@ function buildDrawables(hourFrac, minuteFrac, secondFrac, hourAngle, minuteAngle
       draw: () => {
         const proj = projectPoint(p.x, p.y, p.z);
         const fog = fogMix(p.z);
-        const size = derived.particleSize * proj.scale;
+        const fadein = clamp(p.life / CONFIG.PARTICLE_FADEIN_TIME, 0, 1);
+        const size = derived.particleSize * proj.scale * fadein;
 
         ctx.fillStyle = mixColor(COLOR_SECOND, fog, 1);
         ctx.beginPath();
@@ -584,8 +618,9 @@ export function init({ container }) {
 export function start() {
   startTime = performance.now();
   lastTime = 0;
+  spawnCarry = 0;
   spawnCarryCenter = 0;
-  prewarmCenterEmitter();
+  prewarmParticles();
   rafId = requestAnimationFrame(draw);
 }
 
