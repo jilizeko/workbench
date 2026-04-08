@@ -1,1 +1,11 @@
 .DS_Store
+node_modules/
+docs/media/*/candidates/
+docs/media/*/renders/
+docs/media/*/frames/
+docs/media/*/reports/
+package-lock.json
+package.json
+scripts/
+render-specs/
+render-pipe.md

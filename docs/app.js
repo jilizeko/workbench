@@ -13,10 +13,11 @@ let currentWork = null;
 let currentModule = null;
 
 const basePath = getBasePath();
+const capture = createCaptureRuntime();
 
 function getBasePath() {
   const path = window.location.pathname;
-  const markers = ["/works/", "/all/", "/credits/"];
+  const markers = ["/works/", "/work/", "/all/", "/credits/"];
 
   for (const marker of markers) {
     const index = path.indexOf(marker);
@@ -34,6 +35,91 @@ function getBasePath() {
   }
 
   return path.slice(0, path.lastIndexOf("/") + 1);
+}
+
+function toPositiveInt(value) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.floor(parsed));
+}
+
+function createMulberry32(seed) {
+  let state = seed >>> 0;
+  return function next() {
+    state += 0x6d2b79f5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function nextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
+  });
+}
+
+function createCaptureRuntime() {
+  const params = new URLSearchParams(window.location.search);
+  const seed = toPositiveInt(params.get("seed"));
+  const timeValue = params.get("time");
+  const parsedTime = timeValue ? Date.parse(timeValue) : Number.NaN;
+  const baseTimeMs = Number.isFinite(parsedTime) ? parsedTime : null;
+  const hideUi = params.get("ui") === "0";
+  const enabled = seed !== null || baseTimeMs !== null || hideUi || params.get("fullscreen") === "1";
+
+  if (!enabled) return null;
+
+  if (hideUi) {
+    document.getElementById("top-nav")?.setAttribute("hidden", "");
+    document.getElementById("bottom-nav")?.setAttribute("hidden", "");
+    document.getElementById("fullscreen-btn")?.setAttribute("hidden", "");
+  }
+
+  if (seed !== null) {
+    const seededRandom = createMulberry32(seed);
+    Math.random = () => seededRandom();
+  }
+
+  let currentTimeMs = baseTimeMs ?? Date.now();
+  const NativeDate = Date;
+  class CaptureDate extends NativeDate {
+    constructor(...args) {
+      if (args.length === 0) {
+        super(currentTimeMs);
+      } else {
+        super(...args);
+      }
+    }
+
+    static now() {
+      return currentTimeMs;
+    }
+  }
+  CaptureDate.parse = NativeDate.parse;
+  CaptureDate.UTC = NativeDate.UTC;
+  Object.setPrototypeOf(CaptureDate, NativeDate);
+  window.Date = CaptureDate;
+
+  const api = {
+    ready: false,
+    async captureStill(frameTime = 0) {
+      const frameMs = Number(frameTime) * 1000;
+      currentTimeMs = (baseTimeMs ?? currentTimeMs) + (Number.isFinite(frameMs) ? frameMs : 0);
+      await nextPaint();
+    },
+    async resetScene() {
+      currentTimeMs = baseTimeMs ?? Date.now();
+      await nextPaint();
+    },
+  };
+
+  window.__GENART_CAPTURE__ = api;
+  return api;
 }
 
 function withBase(relativePath) {
@@ -177,6 +263,11 @@ async function loadWork(work) {
       module.start();
     }
 
+    if (capture) {
+      await nextPaint();
+      capture.ready = true;
+    }
+
     updateNav(work);
   } catch (error) {
     console.error("Failed to load work", error);
@@ -209,6 +300,20 @@ function route() {
 
   if (path.startsWith("/works/")) {
     const slug = path.replace("/works/", "").replace(".html", "").trim();
+    const work = getWorkBySlug(slug);
+    if (work) {
+      clearPanel();
+      loadWork(work);
+      return;
+    }
+  }
+
+  if (path.startsWith("/work/")) {
+    const slug = path
+      .replace("/work/", "")
+      .replace(/\/?index\.html$/, "")
+      .replace(/\/$/, "")
+      .trim();
     const work = getWorkBySlug(slug);
     if (work) {
       clearPanel();

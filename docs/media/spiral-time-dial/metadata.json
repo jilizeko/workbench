@@ -1,0 +1,22 @@
+{
+  "slug": "spiral-time-dial",
+  "exportedAt": "2026-04-08T11:34:26.631Z",
+  "assets": {
+    "og-image": {
+      "file": "og-image.png",
+      "source": "docs/media/spiral-time-dial/candidates/renders/og-image--seed-spiral-a--time-2026-04-08T03-03-30-000Z--frame-0-75.png"
+    },
+    "poster-frame": {
+      "file": "poster-frame.png",
+      "source": "docs/media/spiral-time-dial/candidates/renders/poster-frame--seed-spiral-a--time-2026-04-08T03-03-30-000Z--frame-0-75.png"
+    },
+    "loop-landscape": {
+      "file": "loop-landscape.mp4",
+      "source": "docs/media/spiral-time-dial/candidates/renders/loop-landscape--seed-spiral-a--time-2026-04-08T03-03-30-000Z--dur-4.mp4"
+    },
+    "loop-vertical": {
+      "file": "loop-vertical.mp4",
+      "source": "docs/media/spiral-time-dial/candidates/renders/loop-vertical--seed-spiral-a--time-2026-04-08T03-03-30-000Z--dur-4.mp4"
+    }
+  }
+}
