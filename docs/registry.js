@@ -48,5 +48,15 @@ export const works = [
       date: "2026-03-18",
       description: "Spiraling clock dial with depth, ticks, and particles."
     }
+  },
+  {
+    slug: "pollen-clock",
+    title: "Pollen Clock",
+    order: 6,
+    script: "./works/pollen-clock.js",
+    meta: {
+      date: "2026-04-13",
+      description: "3D pollen particles drift and flow to form the current time."
+    }
   }
 ];
