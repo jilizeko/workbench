@@ -33,6 +33,10 @@ const CONFIG = {
   HUE_SHIFT_PER_SECOND: 8,
   FOCUS_PULL_RATIO: 0.12,
   EDGE_FADE_RATIO: 0.14,
+  SHEAR_RATIO: 0.095,
+  SWAY_RATIO: 0.018,
+  KNOT_TILT_RATIO: 0.34,
+  CORE_PULSE_RATIO: 0.11,
 };
 
 function clamp(value, min, max) {
@@ -100,6 +104,7 @@ function buildBands() {
     const t = CONFIG.BAND_COUNT === 1 ? 0.5 : i / (CONFIG.BAND_COUNT - 1);
     const offset = (i - (CONFIG.BAND_COUNT - 1) * 0.5) * bandGap;
     const depth = clamp(1 - Math.abs(t - 0.5) * 1.9, 0.18, 1);
+    const sideBias = (t - 0.5) * 2;
 
     bands.push({
       index: i,
@@ -109,6 +114,7 @@ function buildBands() {
       width: usableWidth,
       depth,
       emphasis: clamp(0.45 + depth * 0.65, 0.45, 1.06),
+      sway: sideBias * 0.6,
       phase: hash01(i + 0.13, t + 0.31),
     });
   }
@@ -193,12 +199,16 @@ function laneY(band, xT, t, phases) {
   const shimmer = Math.cos((xT * Math.PI * 1.2) + t * 0.4 + phases.minutePhase * Math.PI * 2);
   const centerPull = (0.5 - xT) * height * CONFIG.FOCUS_PULL_RATIO * focus * (0.45 + band.depth * 0.75);
   const roleLift = Math.sin((xT - 0.5) * Math.PI * 4 + band.phase * 5 + t * 0.7) * height * 0.01;
+  const directionalWave = Math.sin((xT * Math.PI * 1.4) + t * 0.5 + band.sway) * height * CONFIG.SWAY_RATIO * band.depth;
+  const asymmetry = (xT - 0.5) * height * CONFIG.SHEAR_RATIO * (0.35 + band.depth) * (0.5 + phases.hourPhase * 0.5);
 
   return band.baseY
     + slow * waveScale * (0.5 + band.depth * 0.7)
     + fast * drift * (0.8 + band.depth * 0.28)
     + shimmer * pulse * (0.45 + band.t * 0.4)
     + roleLift
+    + directionalWave
+    + asymmetry
     + centerPull;
 }
 
@@ -207,6 +217,8 @@ function drawCore(t, phases) {
   const cy = height * 0.5;
   const outerRadius = Math.min(width, height) * (CONFIG.CORE_RADIUS_RATIO + phases.hourPhase * 0.02);
   const innerRadius = outerRadius * (CONFIG.KNOT_RADIUS_RATIO / CONFIG.CORE_RADIUS_RATIO);
+  const knotTilt = CONFIG.KNOT_TILT_RATIO + Math.sin(t * 0.7) * 0.06;
+  const pulse = 1 + Math.sin(t * 2.1 + phases.minutePhase * Math.PI * 2) * CONFIG.CORE_PULSE_RATIO;
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
@@ -218,25 +230,25 @@ function drawCore(t, phases) {
   halo.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = halo;
   ctx.beginPath();
-  ctx.arc(cx, cy, outerRadius * 2.3, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, outerRadius * 2.3 * pulse, outerRadius * 2.0, knotTilt, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.strokeStyle = `rgba(255, 255, 255, ${CONFIG.ORBIT_ALPHA})`;
   ctx.lineWidth = Math.max(1, Math.min(width, height) * 0.0024);
   ctx.beginPath();
-  ctx.ellipse(cx, cy, outerRadius * 1.22, outerRadius * 0.72, -0.46 + phases.minutePhase * 0.22, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, outerRadius * 1.22 * pulse, outerRadius * 0.72, -0.46 + phases.minutePhase * 0.22 + knotTilt * 0.2, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.strokeStyle = `rgba(103, 232, 249, ${CONFIG.ORBIT_ALPHA * 1.1})`;
   ctx.lineWidth = Math.max(1, Math.min(width, height) * 0.0018);
   ctx.beginPath();
-  ctx.ellipse(cx, cy, innerRadius * 1.08, innerRadius * 0.62, 0.42 + t * 0.06, Math.PI * 0.04, Math.PI * 1.96);
+  ctx.ellipse(cx, cy, innerRadius * 1.08 * pulse, innerRadius * 0.62, 0.42 + t * 0.06 - knotTilt * 0.3, Math.PI * 0.04, Math.PI * 1.96);
   ctx.stroke();
 
   ctx.strokeStyle = `rgba(255, 255, 255, 0.2)`;
   ctx.lineWidth = Math.max(1, Math.min(width, height) * 0.0012);
   ctx.beginPath();
-  ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, innerRadius * 1.02, innerRadius * 0.88, knotTilt * 0.45, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.restore();
@@ -250,12 +262,14 @@ function drawBandBody(band, t, phases) {
   const glowWidth = Math.max(2.8, Math.min(width, height) * CONFIG.GLOW_WIDTH_RATIO * (0.48 + band.depth * 0.55));
   const alpha = 0.2 + band.depth * 0.34 + phases.secondPhase * 0.05;
   const shadowBlur = Math.max(3, Math.min(width, height) * CONFIG.SHADOW_BLUR_RATIO);
+  const laneShade = band.t < 0.5 ? 0.08 : -0.04;
 
   for (let i = 0; i <= CONFIG.WEAVE_STEPS; i += 1) {
     const xT = i / CONFIG.WEAVE_STEPS;
-    const x = band.baseX + xT * band.width;
+    const xShear = (xT - 0.5) * Math.min(width, height) * CONFIG.SHEAR_RATIO * (band.depth * 0.35);
+    const x = band.baseX + xT * band.width + xShear;
     const y = laneY(band, xT, t, phases);
-    points.push({ x, y, xT });
+    points.push({ x, y, xT, shade: laneShade + (0.5 - xT) * 0.03 });
   }
 
   ctx.save();
@@ -275,8 +289,8 @@ function drawBandBody(band, t, phases) {
   ctx.stroke();
 
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = mixHex("#a7fff2", "#ffd3ef", band.t * 0.8 + phases.minutePhase * 0.2, alpha);
-  ctx.lineWidth = bodyWidth * 0.76;
+  ctx.strokeStyle = mixHex("#a7fff2", "#ffd3ef", band.t * 0.8 + phases.minutePhase * 0.2, alpha * 0.9);
+  ctx.lineWidth = bodyWidth * 0.72;
   ctx.stroke();
 
   ctx.beginPath();
@@ -284,7 +298,7 @@ function drawBandBody(band, t, phases) {
     if (index === 0) ctx.moveTo(point.x, point.y);
     else ctx.lineTo(point.x, point.y);
   });
-  ctx.strokeStyle = `hsla(${hueBase}, 78%, ${58 + band.depth * 6}%, ${0.12 + band.depth * 0.18})`;
+  ctx.strokeStyle = `hsla(${hueBase}, 78%, ${56 + band.depth * 7}%, ${0.1 + band.depth * 0.16})`;
   ctx.lineWidth = highlightWidth;
   ctx.stroke();
 
@@ -293,7 +307,7 @@ function drawBandBody(band, t, phases) {
     if (index === 0) ctx.moveTo(point.x, point.y);
     else ctx.lineTo(point.x, point.y);
   });
-  ctx.strokeStyle = `rgba(255, 255, 255, ${0.05 + band.depth * 0.07})`;
+  ctx.strokeStyle = `rgba(255, 255, 255, ${0.04 + band.depth * 0.06})`;
   ctx.lineWidth = glowWidth;
   ctx.globalCompositeOperation = "screen";
   ctx.stroke();
@@ -317,18 +331,18 @@ function drawCrossLinks(t, phases) {
     const span = Math.abs(yB - yA);
     const depthMix = lerp(a.depth, b.depth, 0.5);
     const focus = link.focus;
-    const waviness = Math.sin(t * 1.1 + link.twist * Math.PI * 3.6 + index * 0.3);
-    const lift = span * (0.16 + link.twist * 0.12) * waviness;
-    const alpha = (0.13 + depthMix * 0.08) * (0.55 + focus * 0.85);
-    const linkWidth = Math.max(0.9, Math.min(width, height) * 0.0032 * (0.8 + depthMix * 0.55));
+    const waviness = Math.sin(t * 1.35 + link.twist * Math.PI * 3.6 + index * 0.3);
+    const lift = span * (0.18 + link.twist * 0.14) * waviness;
+    const alpha = (0.1 + depthMix * 0.08) * (0.45 + focus * 0.8);
+    const linkWidth = Math.max(0.85, Math.min(width, height) * 0.0029 * (0.8 + depthMix * 0.5));
 
     ctx.shadowBlur = Math.max(2, Math.min(width, height) * 0.006 * focus);
     ctx.shadowColor = mixHex("#a9fbff", "#ffaad8", link.twist, alpha * 0.5);
     ctx.strokeStyle = mixHex("#a9fbff", "#ff8ec0", link.twist * 0.9 + focus * 0.1, alpha);
     ctx.lineWidth = linkWidth;
     ctx.beginPath();
-    ctx.moveTo(x - 9, bridge - lift * 0.1);
-    ctx.quadraticCurveTo(x, bridge + lift * 0.55, x + 9, bridge - lift * 0.1);
+    ctx.moveTo(x - 10, bridge - lift * 0.08);
+    ctx.quadraticCurveTo(x, bridge + lift * 0.62, x + 10, bridge - lift * 0.08);
     ctx.stroke();
 
     if (hash01(index, xT, t) < CONFIG.SPARK_RATE * (0.5 + focus)) {
@@ -372,7 +386,7 @@ function draw(time) {
 
   drawCore(t, phases);
 
-  const orderedBands = [...bands].sort((a, b) => a.depth - b.depth);
+  const orderedBands = [...bands].sort((a, b) => a.depth - b.depth || a.index - b.index);
   for (let i = 0; i < orderedBands.length; i += 1) {
     drawBandBody(orderedBands[i], t, phases);
   }
