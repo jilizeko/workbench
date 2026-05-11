@@ -58,5 +58,15 @@ export const works = [
       date: "2026-04-13",
       description: "3D pollen particles drift and flow to form the current time."
     }
+  },
+  {
+    slug: "prism-weave",
+    title: "Prism Weave",
+    order: 7,
+    script: "./works/prism-weave.js",
+    meta: {
+      date: "2026-05-11",
+      description: "Chromatic woven strands pulse with the current time phases."
+    }
   }
 ];
