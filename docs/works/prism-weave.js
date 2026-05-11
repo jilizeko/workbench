@@ -1,7 +1,15 @@
+import {
+  DEFAULT_PRISM_WEAVE_CONFIG,
+  loadPrismWeaveConfig,
+  savePrismWeaveConfig,
+} from "./prism-weave.config.js";
+
 let canvas;
 let ctx;
 let rafId;
 let onResize;
+let controlsRoot;
+let controlsStyle;
 
 let width = 0;
 let height = 0;
@@ -12,37 +20,45 @@ let ghostBands = [];
 let intersections = [];
 let particles = [];
 
-const CONFIG = {
-  BG_TOP: "#030508",
-  BG_BOTTOM: "#0d0916",
-  BAND_COUNT: 122,
-  GHOST_BAND_COUNT: 124,
-  WEAVE_STEPS: 7,
-  CROSS_LINKS: 10,
-  BODY_WIDTH_RATIO: 0.008,
-  HIGHLIGHT_WIDTH_RATIO: 0.0035,
-  GLOW_WIDTH_RATIO: 0.018,
-  TRAIL_ALPHA: 0.065,
-  ORBIT_ALPHA: 0.13,
-  SPARK_ALPHA: 0.28,
-  SPARK_RATE: 0.1,
-  CORE_RADIUS_RATIO: 0.18,
-  KNOT_RADIUS_RATIO: 0.11,
-  WAVE_SCALE_RATIO: 0.042,
-  WAVE_DRIFT_RATIO: 0.022,
-  LANE_PULSE_RATIO: 0.007,
-  SHADOW_BLUR_RATIO: 0.018,
-  HUE_SPAN: 340,
-  HUE_SHIFT_PER_SECOND: 14,
-  FOCUS_PULL_RATIO: 0.05,
-  EDGE_FADE_RATIO: 0.18,
-  SHEAR_RATIO: 0.055,
-  SWAY_RATIO: 0.012,
-  KNOT_TILT_RATIO: 0.34,
-  CORE_PULSE_RATIO: 0.15,
-  PARTICLE_COUNT: 42,
-  PARTICLE_SPEED: 0.28,
-  BG_PULSE_STRENGTH: 0.06,
+const CONFIG = loadPrismWeaveConfig();
+
+const INTEGER_CONFIG_KEYS = new Set([
+  "BAND_COUNT",
+  "GHOST_BAND_COUNT",
+  "WEAVE_STEPS",
+  "CROSS_LINKS",
+  "PARTICLE_COUNT",
+]);
+
+const CONFIG_RANGES = {
+  BAND_COUNT: { min: 1, max: 240, step: 1 },
+  GHOST_BAND_COUNT: { min: 0, max: 240, step: 1 },
+  WEAVE_STEPS: { min: 4, max: 220, step: 1 },
+  CROSS_LINKS: { min: 0, max: 160, step: 1 },
+  BODY_WIDTH_RATIO: { min: 0.001, max: 0.05, step: 0.0005 },
+  HIGHLIGHT_WIDTH_RATIO: { min: 0.0005, max: 0.03, step: 0.0005 },
+  GLOW_WIDTH_RATIO: { min: 0.001, max: 0.1, step: 0.0005 },
+  TRAIL_ALPHA: { min: 0, max: 0.4, step: 0.001 },
+  ORBIT_ALPHA: { min: 0, max: 0.8, step: 0.001 },
+  SPARK_ALPHA: { min: 0, max: 1, step: 0.001 },
+  SPARK_RATE: { min: 0, max: 1, step: 0.001 },
+  CORE_RADIUS_RATIO: { min: 0.02, max: 0.8, step: 0.001 },
+  KNOT_RADIUS_RATIO: { min: 0.02, max: 0.6, step: 0.001 },
+  WAVE_SCALE_RATIO: { min: 0.001, max: 0.2, step: 0.001 },
+  WAVE_DRIFT_RATIO: { min: 0, max: 0.2, step: 0.001 },
+  LANE_PULSE_RATIO: { min: 0, max: 0.1, step: 0.0005 },
+  SHADOW_BLUR_RATIO: { min: 0, max: 0.08, step: 0.0005 },
+  HUE_SPAN: { min: 0, max: 360, step: 1 },
+  HUE_SHIFT_PER_SECOND: { min: 0, max: 80, step: 0.1 },
+  FOCUS_PULL_RATIO: { min: 0, max: 0.4, step: 0.001 },
+  EDGE_FADE_RATIO: { min: 0, max: 1, step: 0.001 },
+  SHEAR_RATIO: { min: 0, max: 0.2, step: 0.001 },
+  SWAY_RATIO: { min: 0, max: 0.2, step: 0.001 },
+  KNOT_TILT_RATIO: { min: 0, max: 1.2, step: 0.001 },
+  CORE_PULSE_RATIO: { min: 0, max: 0.8, step: 0.001 },
+  PARTICLE_COUNT: { min: 0, max: 800, step: 1 },
+  PARTICLE_SPEED: { min: 0, max: 4, step: 0.01 },
+  BG_PULSE_STRENGTH: { min: 0, max: 0.5, step: 0.001 },
 };
 
 function clamp(value, min, max) {
@@ -95,6 +111,295 @@ function mixHex(a, b, t, alpha = 1) {
 function hash01(a, b, c = 0) {
   const value = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453;
   return value - Math.floor(value);
+}
+
+function rgbToHex({ r, g, b }) {
+  const rr = clamp(Math.round(r), 0, 255).toString(16).padStart(2, "0");
+  const gg = clamp(Math.round(g), 0, 255).toString(16).padStart(2, "0");
+  const bb = clamp(Math.round(b), 0, 255).toString(16).padStart(2, "0");
+  return `#${rr}${gg}${bb}`;
+}
+
+function formatControlValue(key, value) {
+  if (INTEGER_CONFIG_KEYS.has(key)) return String(Math.round(value));
+  if (Math.abs(value) >= 100) return value.toFixed(1);
+  if (Math.abs(value) >= 10) return value.toFixed(2);
+  if (Math.abs(value) >= 1) return value.toFixed(3);
+  return value.toFixed(4);
+}
+
+function getRangeMeta(key, value) {
+  if (CONFIG_RANGES[key]) return CONFIG_RANGES[key];
+
+  if (INTEGER_CONFIG_KEYS.has(key)) {
+    return {
+      min: Math.max(0, Math.floor(value * 0.25)),
+      max: Math.max(2, Math.ceil(value * 3)),
+      step: 1,
+    };
+  }
+
+  if (value <= 1) return { min: 0, max: 1, step: 0.001 };
+  if (value <= 10) return { min: 0, max: 10, step: 0.01 };
+  return { min: 0, max: Math.max(20, value * 2), step: 0.1 };
+}
+
+function createControls() {
+  if (controlsRoot) return;
+
+  controlsStyle = document.createElement("style");
+  controlsStyle.textContent = `
+    .prism-weave-controls {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 30;
+      width: min(280px, calc(100vw - 16px));
+      max-height: calc(100vh - 16px);
+      overflow: auto;
+      background: rgba(8, 9, 16, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      padding: 7px;
+      color: rgba(245, 247, 255, 0.92);
+      font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      box-sizing: border-box;
+    }
+    .prism-weave-controls__title {
+      margin: 0 0 6px;
+      opacity: 0.88;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .prism-weave-controls__actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      margin: 0 0 6px;
+    }
+    .prism-weave-controls__button {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(245, 247, 255, 0.92);
+      border-radius: 5px;
+      padding: 4px 6px;
+      cursor: pointer;
+      font: inherit;
+      line-height: 1.15;
+      text-align: center;
+    }
+    .prism-weave-controls__button:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .prism-weave-controls__status {
+      margin: 0 0 6px;
+      min-height: 12px;
+      opacity: 0.78;
+    }
+    .prism-weave-controls__row {
+      display: grid;
+      grid-template-columns: 1fr 52px;
+      gap: 4px;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .prism-weave-controls__name {
+      grid-column: 1 / -1;
+      opacity: 0.84;
+      margin-bottom: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .prism-weave-controls__slider {
+      width: 100%;
+      margin: 0;
+      height: 12px;
+      accent-color: rgba(140, 222, 255, 0.95);
+    }
+    .prism-weave-controls__value {
+      text-align: right;
+      opacity: 0.94;
+      white-space: nowrap;
+    }
+  `;
+  document.head.appendChild(controlsStyle);
+
+  controlsRoot = document.createElement("aside");
+  controlsRoot.className = "prism-weave-controls";
+
+  const title = document.createElement("div");
+  title.className = "prism-weave-controls__title";
+  title.textContent = "Prism Weave Controls";
+  controlsRoot.appendChild(title);
+
+  const actions = document.createElement("div");
+  actions.className = "prism-weave-controls__actions";
+
+  const resetButton = document.createElement("button");
+  resetButton.className = "prism-weave-controls__button";
+  resetButton.type = "button";
+  resetButton.textContent = "Reset Defaults";
+
+  const copyButton = document.createElement("button");
+  copyButton.className = "prism-weave-controls__button";
+  copyButton.type = "button";
+  copyButton.textContent = "Copy JSON";
+
+  actions.appendChild(resetButton);
+  actions.appendChild(copyButton);
+  controlsRoot.appendChild(actions);
+
+  const status = document.createElement("div");
+  status.className = "prism-weave-controls__status";
+  controlsRoot.appendChild(status);
+
+  const setStatus = (message) => {
+    status.textContent = message;
+    if (!message) return;
+    window.setTimeout(() => {
+      if (status.textContent === message) status.textContent = "";
+    }, 1400);
+  };
+
+  resetButton.addEventListener("click", () => {
+    Object.assign(CONFIG, DEFAULT_PRISM_WEAVE_CONFIG);
+    savePrismWeaveConfig(CONFIG);
+    removeControls();
+    createControls();
+    if (canvas && ctx) buildBands();
+  });
+
+  copyButton.addEventListener("click", async () => {
+    const payload = JSON.stringify(CONFIG, null, 2);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(payload);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setStatus("Copied current config");
+    } catch {
+      setStatus("Copy failed");
+    }
+  });
+
+  Object.entries(CONFIG).forEach(([key, initialValue]) => {
+    if (typeof initialValue !== "number" && typeof initialValue !== "string") return;
+
+    if (typeof initialValue === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(initialValue)) {
+      const colorContainer = document.createElement("div");
+      colorContainer.className = "prism-weave-controls__row";
+
+      const colorName = document.createElement("div");
+      colorName.className = "prism-weave-controls__name";
+      colorName.textContent = key;
+
+      const colorValue = document.createElement("div");
+      colorValue.className = "prism-weave-controls__value";
+      colorValue.style.gridColumn = "1 / -1";
+      colorValue.style.textAlign = "left";
+
+      const rgb = hexToRgb(initialValue);
+      const updateColorText = () => {
+        const nextHex = rgbToHex(rgb);
+        CONFIG[key] = nextHex;
+        colorValue.textContent = `${nextHex}  (r:${rgb.r} g:${rgb.g} b:${rgb.b})`;
+      };
+      updateColorText();
+
+      colorContainer.appendChild(colorName);
+      colorContainer.appendChild(colorValue);
+      controlsRoot.appendChild(colorContainer);
+
+      ["r", "g", "b"].forEach((channel) => {
+        const row = document.createElement("div");
+        row.className = "prism-weave-controls__row";
+
+        const name = document.createElement("div");
+        name.className = "prism-weave-controls__name";
+        name.textContent = `${key}_${channel.toUpperCase()}`;
+
+        const slider = document.createElement("input");
+        slider.className = "prism-weave-controls__slider";
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "255";
+        slider.step = "1";
+        slider.value = String(rgb[channel]);
+
+        const value = document.createElement("div");
+        value.className = "prism-weave-controls__value";
+        value.textContent = String(rgb[channel]);
+
+        slider.addEventListener("input", () => {
+          rgb[channel] = Number(slider.value);
+          value.textContent = String(rgb[channel]);
+          updateColorText();
+          savePrismWeaveConfig(CONFIG);
+          if (canvas && ctx) buildBands();
+        });
+
+        row.appendChild(name);
+        row.appendChild(slider);
+        row.appendChild(value);
+        controlsRoot.appendChild(row);
+      });
+
+      return;
+    }
+
+    if (typeof initialValue !== "number") return;
+
+    const row = document.createElement("div");
+    row.className = "prism-weave-controls__row";
+
+    const name = document.createElement("div");
+    name.className = "prism-weave-controls__name";
+    name.textContent = key;
+
+    const slider = document.createElement("input");
+    slider.className = "prism-weave-controls__slider";
+    slider.type = "range";
+    const range = getRangeMeta(key, initialValue);
+    slider.min = String(range.min);
+    slider.max = String(range.max);
+    slider.step = String(range.step);
+    slider.value = String(initialValue);
+
+    const value = document.createElement("div");
+    value.className = "prism-weave-controls__value";
+    value.textContent = formatControlValue(key, initialValue);
+
+    slider.addEventListener("input", () => {
+      let next = Number(slider.value);
+      if (INTEGER_CONFIG_KEYS.has(key)) next = Math.round(next);
+      CONFIG[key] = next;
+      value.textContent = formatControlValue(key, next);
+      savePrismWeaveConfig(CONFIG);
+      if (canvas && ctx) buildBands();
+    });
+
+    row.appendChild(name);
+    row.appendChild(slider);
+    row.appendChild(value);
+    controlsRoot.appendChild(row);
+  });
+
+  document.body.appendChild(controlsRoot);
+}
+
+function removeControls() {
+  if (controlsRoot && controlsRoot.parentElement) {
+    controlsRoot.parentElement.removeChild(controlsRoot);
+  }
+  if (controlsStyle && controlsStyle.parentElement) {
+    controlsStyle.parentElement.removeChild(controlsStyle);
+  }
+  controlsRoot = null;
+  controlsStyle = null;
 }
 
 function buildBands() {
@@ -585,6 +890,7 @@ export function init({ container }) {
 
   window.addEventListener("resize", onResize);
   resize();
+  createControls();
 }
 
 export function start() {
@@ -595,6 +901,7 @@ export function start() {
 export function destroy() {
   if (rafId) cancelAnimationFrame(rafId);
   if (onResize) window.removeEventListener("resize", onResize);
+  removeControls();
   if (canvas && canvas.parentElement) canvas.parentElement.removeChild(canvas);
 
   canvas = null;
