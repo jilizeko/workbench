@@ -59,6 +59,11 @@ const CONFIG_RANGES = {
   PARTICLE_COUNT: { min: 0, max: 800, step: 1 },
   PARTICLE_SPEED: { min: 0, max: 4, step: 0.01 },
   BG_PULSE_STRENGTH: { min: 0, max: 0.5, step: 0.001 },
+  BAND_CLAMP_TOP: { min: 0, max: 3, step: 0.001 },
+  BAND_CLAMP_BOTTOM: { min: 0, max: 3, step: 0.001 },
+  GHOST_CLAMP_TOP: { min: 0, max: 3, step: 0.001 },
+  GHOST_CLAMP_BOTTOM: { min: 0, max: 3, step: 0.001 },
+  WAVE_AMPLITUDE_MULTIPLIER: { min: 0, max: 3, step: 0.01 },
 };
 
 function clamp(value, min, max) {
@@ -144,6 +149,41 @@ function getRangeMeta(key, value) {
   return { min: 0, max: Math.max(20, value * 2), step: 0.1 };
 }
 
+const CONTROL_GROUPS = [
+  {
+    title: "Background",
+    keys: ["BG_TOP", "BG_BOTTOM", "BG_PULSE_STRENGTH", "TRAIL_ALPHA", "EDGE_FADE_RATIO"],
+  },
+  {
+    title: "Bands",
+    keys: ["BAND_COUNT", "BAND_CLAMP_TOP", "BAND_CLAMP_BOTTOM", "BODY_WIDTH_RATIO", "HIGHLIGHT_WIDTH_RATIO", "GLOW_WIDTH_RATIO", "WEAVE_STEPS", "WAVE_SCALE_RATIO", "WAVE_DRIFT_RATIO", "WAVE_AMPLITUDE_MULTIPLIER", "LANE_PULSE_RATIO", "SWAY_RATIO", "FOCUS_PULL_RATIO", "SHEAR_RATIO"],
+  },
+  {
+    title: "Ghost Waves",
+    keys: ["GHOST_BAND_COUNT", "GHOST_CLAMP_TOP", "GHOST_CLAMP_BOTTOM"],
+  },
+  {
+    title: "Core",
+    keys: ["CORE_RADIUS_RATIO", "KNOT_RADIUS_RATIO", "KNOT_TILT_RATIO", "CORE_PULSE_RATIO", "ORBIT_ALPHA"],
+  },
+  {
+    title: "Color & Motion",
+    keys: ["HUE_SPAN", "HUE_SHIFT_PER_SECOND"],
+  },
+  {
+    title: "Cross Links",
+    keys: ["CROSS_LINKS"],
+  },
+  {
+    title: "Particles",
+    keys: ["PARTICLE_COUNT", "PARTICLE_SPEED"],
+  },
+  {
+    title: "Effects",
+    keys: ["SHADOW_BLUR_RATIO"],
+  },
+];
+
 function createControls() {
   if (controlsRoot) return;
 
@@ -170,6 +210,19 @@ function createControls() {
       margin: 0 0 6px;
       opacity: 0.88;
       letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .prism-weave-controls__section {
+      margin: 6px 0 0;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .prism-weave-controls__section-title {
+      margin: 0 0 4px;
+      opacity: 0.75;
+      font-weight: bold;
+      font-size: 9px;
+      letter-spacing: 0.03em;
       text-transform: uppercase;
     }
     .prism-weave-controls__actions {
@@ -286,106 +339,121 @@ function createControls() {
     }
   });
 
-  Object.entries(CONFIG).forEach(([key, initialValue]) => {
-    if (typeof initialValue !== "number" && typeof initialValue !== "string") return;
+  CONTROL_GROUPS.forEach((group) => {
+    const section = document.createElement("div");
+    section.className = "prism-weave-controls__section";
 
-    if (typeof initialValue === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(initialValue)) {
-      const colorContainer = document.createElement("div");
-      colorContainer.className = "prism-weave-controls__row";
+    const sectionTitle = document.createElement("div");
+    sectionTitle.className = "prism-weave-controls__section-title";
+    sectionTitle.textContent = group.title;
+    section.appendChild(sectionTitle);
 
-      const colorName = document.createElement("div");
-      colorName.className = "prism-weave-controls__name";
-      colorName.textContent = key;
+    group.keys.forEach((key) => {
+      const initialValue = CONFIG[key];
+      if (initialValue === undefined || (typeof initialValue !== "number" && typeof initialValue !== "string")) {
+        return;
+      }
 
-      const colorValue = document.createElement("div");
-      colorValue.className = "prism-weave-controls__value";
-      colorValue.style.gridColumn = "1 / -1";
-      colorValue.style.textAlign = "left";
+      if (typeof initialValue === "string" && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(initialValue)) {
+        const colorContainer = document.createElement("div");
+        colorContainer.className = "prism-weave-controls__row";
 
-      const rgb = hexToRgb(initialValue);
-      const updateColorText = () => {
-        const nextHex = rgbToHex(rgb);
-        CONFIG[key] = nextHex;
-        colorValue.textContent = `${nextHex}  (r:${rgb.r} g:${rgb.g} b:${rgb.b})`;
-      };
-      updateColorText();
+        const colorName = document.createElement("div");
+        colorName.className = "prism-weave-controls__name";
+        colorName.textContent = key;
 
-      colorContainer.appendChild(colorName);
-      colorContainer.appendChild(colorValue);
-      controlsRoot.appendChild(colorContainer);
+        const colorValue = document.createElement("div");
+        colorValue.className = "prism-weave-controls__value";
+        colorValue.style.gridColumn = "1 / -1";
+        colorValue.style.textAlign = "left";
 
-      ["r", "g", "b"].forEach((channel) => {
-        const row = document.createElement("div");
-        row.className = "prism-weave-controls__row";
+        const rgb = hexToRgb(initialValue);
+        const updateColorText = () => {
+          const nextHex = rgbToHex(rgb);
+          CONFIG[key] = nextHex;
+          colorValue.textContent = `${nextHex}  (r:${rgb.r} g:${rgb.g} b:${rgb.b})`;
+        };
+        updateColorText();
 
-        const name = document.createElement("div");
-        name.className = "prism-weave-controls__name";
-        name.textContent = `${key}_${channel.toUpperCase()}`;
+        colorContainer.appendChild(colorName);
+        colorContainer.appendChild(colorValue);
+        section.appendChild(colorContainer);
 
-        const slider = document.createElement("input");
-        slider.className = "prism-weave-controls__slider";
-        slider.type = "range";
-        slider.min = "0";
-        slider.max = "255";
-        slider.step = "1";
-        slider.value = String(rgb[channel]);
+        ["r", "g", "b"].forEach((channel) => {
+          const row = document.createElement("div");
+          row.className = "prism-weave-controls__row";
 
-        const value = document.createElement("div");
-        value.className = "prism-weave-controls__value";
-        value.textContent = String(rgb[channel]);
+          const name = document.createElement("div");
+          name.className = "prism-weave-controls__name";
+          name.textContent = `${key}_${channel.toUpperCase()}`;
 
-        slider.addEventListener("input", () => {
-          rgb[channel] = Number(slider.value);
+          const slider = document.createElement("input");
+          slider.className = "prism-weave-controls__slider";
+          slider.type = "range";
+          slider.min = "0";
+          slider.max = "255";
+          slider.step = "1";
+          slider.value = String(rgb[channel]);
+
+          const value = document.createElement("div");
+          value.className = "prism-weave-controls__value";
           value.textContent = String(rgb[channel]);
-          updateColorText();
-          savePrismWeaveConfig(CONFIG);
-          if (canvas && ctx) buildBands();
+
+          slider.addEventListener("input", () => {
+            rgb[channel] = Number(slider.value);
+            value.textContent = String(rgb[channel]);
+            updateColorText();
+            savePrismWeaveConfig(CONFIG);
+            if (canvas && ctx) buildBands();
+          });
+
+          row.appendChild(name);
+          row.appendChild(slider);
+          row.appendChild(value);
+          section.appendChild(row);
         });
 
-        row.appendChild(name);
-        row.appendChild(slider);
-        row.appendChild(value);
-        controlsRoot.appendChild(row);
+        return;
+      }
+
+      if (typeof initialValue !== "number") return;
+
+      const row = document.createElement("div");
+      row.className = "prism-weave-controls__row";
+
+      const name = document.createElement("div");
+      name.className = "prism-weave-controls__name";
+      name.textContent = key;
+
+      const slider = document.createElement("input");
+      slider.className = "prism-weave-controls__slider";
+      slider.type = "range";
+      const range = getRangeMeta(key, initialValue);
+      slider.min = String(range.min);
+      slider.max = String(range.max);
+      slider.step = String(range.step);
+      slider.value = String(initialValue);
+
+      const value = document.createElement("div");
+      value.className = "prism-weave-controls__value";
+      value.textContent = formatControlValue(key, initialValue);
+
+      slider.addEventListener("input", () => {
+        let next = Number(slider.value);
+        if (INTEGER_CONFIG_KEYS.has(key)) next = Math.round(next);
+        CONFIG[key] = next;
+        value.textContent = formatControlValue(key, next);
+        savePrismWeaveConfig(CONFIG);
+        if (canvas && ctx) buildBands();
       });
 
-      return;
-    }
-
-    if (typeof initialValue !== "number") return;
-
-    const row = document.createElement("div");
-    row.className = "prism-weave-controls__row";
-
-    const name = document.createElement("div");
-    name.className = "prism-weave-controls__name";
-    name.textContent = key;
-
-    const slider = document.createElement("input");
-    slider.className = "prism-weave-controls__slider";
-    slider.type = "range";
-    const range = getRangeMeta(key, initialValue);
-    slider.min = String(range.min);
-    slider.max = String(range.max);
-    slider.step = String(range.step);
-    slider.value = String(initialValue);
-
-    const value = document.createElement("div");
-    value.className = "prism-weave-controls__value";
-    value.textContent = formatControlValue(key, initialValue);
-
-    slider.addEventListener("input", () => {
-      let next = Number(slider.value);
-      if (INTEGER_CONFIG_KEYS.has(key)) next = Math.round(next);
-      CONFIG[key] = next;
-      value.textContent = formatControlValue(key, next);
-      savePrismWeaveConfig(CONFIG);
-      if (canvas && ctx) buildBands();
+      row.appendChild(name);
+      row.appendChild(slider);
+      row.appendChild(value);
+      section.appendChild(row);
     });
 
-    row.appendChild(name);
-    row.appendChild(slider);
-    row.appendChild(value);
-    controlsRoot.appendChild(row);
+    controlsRoot.appendChild(section);
   });
 
   document.body.appendChild(controlsRoot);
@@ -432,7 +500,8 @@ function buildBands() {
       phase: hash01(i + 0.13, t + 0.31),
       isLead,
       speedMult: 0.7 + hash01(i + 1.1, t + 0.77) * 0.9,
-      maxExcursion: bandGap * 0.9,
+      clampTop: bandGap * CONFIG.BAND_CLAMP_TOP,
+      clampBottom: bandGap * CONFIG.BAND_CLAMP_BOTTOM,
     });
   }
 
@@ -453,7 +522,8 @@ function buildBands() {
       sway: sideBias * 0.22,
       phase: hash01(i + 10.13, t + 5.31),
       speedMult: 0.45 + hash01(i + 2.8, t + 1.9) * 0.55,
-      maxExcursion: ghostGap * 0.72,
+      clampTop: ghostGap * CONFIG.GHOST_CLAMP_TOP,
+      clampBottom: ghostGap * CONFIG.GHOST_CLAMP_BOTTOM,
       widthScale: 0.75 + hash01(i + 8.1, t + 3.2) * 0.75,
       alphaScale: 0.55 + hash01(i + 1.9, t + 6.7) * 0.6,
     });
@@ -564,8 +634,8 @@ function drawBackdrop(t, phases) {
 }
 
 function laneY(band, xT, t, phases) {
-  const waveScale = height * CONFIG.WAVE_SCALE_RATIO;
-  const drift = height * CONFIG.WAVE_DRIFT_RATIO;
+  const waveScale = height * CONFIG.WAVE_SCALE_RATIO * CONFIG.WAVE_AMPLITUDE_MULTIPLIER;
+  const drift = height * CONFIG.WAVE_DRIFT_RATIO * CONFIG.WAVE_AMPLITUDE_MULTIPLIER;
   const pulse = height * CONFIG.LANE_PULSE_RATIO;
   const focus = 1 - smoothstep(0.05, 0.5, Math.abs(xT - 0.5) * 2);
   const sp = band.speedMult;
@@ -585,17 +655,18 @@ function laneY(band, xT, t, phases) {
     + roleLift
     + directionalWave
     + centerPull;
-  // hard-clamp each band to its allocated lane
-  return clamp(raw, band.baseY - band.maxExcursion, band.baseY + band.maxExcursion);
+  // clamp each band to its allocated lane
+  const clamped = clamp(raw, band.baseY - band.clampBottom, band.baseY + band.clampTop);
+  return clamped;
 }
 
 function laneYGhost(band, xT, t, phases) {
   const macro = Math.sin((xT * Math.PI * 1.35) + t * (0.24 + phases.hourPhase * 0.12) * band.speedMult + band.phase * 2.2);
   const soft = Math.cos((xT * Math.PI * 2.4) - t * (0.32 + phases.minutePhase * 0.3) * band.speedMult + band.phase * 5.4);
   const sway = Math.sin((xT * Math.PI * 2) + t * 0.22 + band.sway);
-  const amp = height * 0.075 * band.depth;
+  const amp = height * 0.075 * band.depth * CONFIG.WAVE_AMPLITUDE_MULTIPLIER;
   const raw = band.baseY + macro * amp * 0.72 + soft * amp * 0.38 + sway * height * 0.018;
-  return clamp(raw, band.baseY - band.maxExcursion, band.baseY + band.maxExcursion);
+  return clamp(raw, band.baseY - band.clampBottom, band.baseY + band.clampTop);
 }
 
 function drawCore(t, phases) {

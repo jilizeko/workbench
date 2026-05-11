@@ -36,13 +36,22 @@ Generate the JavaScript module that implements the approved artwork concept usin
    - recompute canvas size and internal buffers
    - remove the listener in `destroy()`
    - Note: `app.js` attaches a `ResizeObserver` on `#art-container` that dispatches `window.resize`, so modules automatically resize on fullscreen enter/exit without extra code.
-6. Export the lifecycle functions.
-7. Add tunable parameters where useful (examples: particle count, noise scale, speed, trail length).
+6. Add a dedicated config module and runtime controls (required standard):
+   - create `docs/works/<slug>.config.js` with default tunable constants
+   - load defaults from config module into runtime
+   - render a compact runtime control panel with sliders for numeric fields and controls for color fields
+   - persist values on every change to localStorage
+   - include `Reset Defaults` and `Copy JSON` controls
+   - clean up panel DOM/style and listeners in `destroy()`
+7. Export the lifecycle functions.
 
 ## Output Format
 ```
 File path:
 docs/works/<slug>.js
+
+Config path:
+docs/works/<slug>.config.js
 
 Module code:
 

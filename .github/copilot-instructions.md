@@ -3,6 +3,7 @@
 ## Code Style
 - Plain HTML/CSS/JS only; no frameworks per [prd.md](prd.md).
 - Keep UI text-only (no button elements) except the fullscreen toggle; use minimal typography and layout per [prd.md](prd.md).
+- Exception for development controls: each new artwork may include a compact runtime control panel (sliders + utility buttons) for tuning parameters.
 
 ## Architecture
 - Single shell page provides the DOM container and minimal navigation UI; it does not embed specific art code.
@@ -20,6 +21,13 @@
 - One screen shows one work; auto-start on load; no scroll; work occupies most of the viewport with small UI margins.
 - The art container is a single shared canvas area; modules must clean up to avoid resource leaks.
 - The `#art-container` uses CSS grid with `overflow: hidden`; `.art-canvas` has `min-width: 0; min-height: 0` to prevent intrinsic sizing from blocking shrink on resize.
+- New standard for all generated artworks:
+	- keep all tunable parameters in a dedicated config module `docs/works/<slug>.config.js`
+	- load config defaults from that module in the art runtime
+	- render a compact runtime slider panel for all numeric and color config fields
+	- persist config on each slider/input change via localStorage
+	- include at least `Reset Defaults` and `Copy JSON` actions in the panel
+	- remove panel DOM/style listeners in `destroy()` together with render cleanup
 - Adding a new work: create a module file in `docs/works/`, add a registry entry, and add a wrapper page in `docs/works/<slug>.html`.
 - `/all/` is indexable list only (no extra descriptions or paragraphs).
 
