@@ -9,34 +9,38 @@ let startTime = 0;
 
 let bands = [];
 let intersections = [];
+let particles = [];
 
 const CONFIG = {
-  BG_TOP: "#05070b",
-  BG_BOTTOM: "#110d16",
-  BAND_COUNT: 6,
-  WEAVE_STEPS: 56,
-  CROSS_LINKS: 12,
-  BODY_WIDTH_RATIO: 0.035,
-  HIGHLIGHT_WIDTH_RATIO: 0.012,
-  GLOW_WIDTH_RATIO: 0.06,
-  TRAIL_ALPHA: 0.08,
-  ORBIT_ALPHA: 0.11,
-  SPARK_ALPHA: 0.22,
-  SPARK_RATE: 0.08,
-  CORE_RADIUS_RATIO: 0.175,
-  KNOT_RADIUS_RATIO: 0.108,
-  WAVE_SCALE_RATIO: 0.066,
+  BG_TOP: "#030508",
+  BG_BOTTOM: "#0d0916",
+  BAND_COUNT: 5,
+  WEAVE_STEPS: 72,
+  CROSS_LINKS: 16,
+  BODY_WIDTH_RATIO: 0.028,
+  HIGHLIGHT_WIDTH_RATIO: 0.008,
+  GLOW_WIDTH_RATIO: 0.055,
+  TRAIL_ALPHA: 0.065,
+  ORBIT_ALPHA: 0.13,
+  SPARK_ALPHA: 0.28,
+  SPARK_RATE: 0.1,
+  CORE_RADIUS_RATIO: 0.18,
+  KNOT_RADIUS_RATIO: 0.11,
+  WAVE_SCALE_RATIO: 0.055,
   WAVE_DRIFT_RATIO: 0.022,
   LANE_PULSE_RATIO: 0.01,
-  SHADOW_BLUR_RATIO: 0.013,
-  HUE_SPAN: 186,
-  HUE_SHIFT_PER_SECOND: 8,
-  FOCUS_PULL_RATIO: 0.12,
-  EDGE_FADE_RATIO: 0.14,
-  SHEAR_RATIO: 0.095,
-  SWAY_RATIO: 0.018,
+  SHADOW_BLUR_RATIO: 0.018,
+  HUE_SPAN: 340,
+  HUE_SHIFT_PER_SECOND: 14,
+  FOCUS_PULL_RATIO: 0.05,
+  EDGE_FADE_RATIO: 0.18,
+  SHEAR_RATIO: 0.055,
+  SWAY_RATIO: 0.016,
   KNOT_TILT_RATIO: 0.34,
-  CORE_PULSE_RATIO: 0.11,
+  CORE_PULSE_RATIO: 0.15,
+  PARTICLE_COUNT: 60,
+  PARTICLE_SPEED: 0.28,
+  BG_PULSE_STRENGTH: 0.06,
 };
 
 function clamp(value, min, max) {
@@ -94,17 +98,19 @@ function hash01(a, b, c = 0) {
 function buildBands() {
   bands = [];
   intersections = [];
+  particles = [];
 
-  const usableWidth = width * 0.9;
+  const usableWidth = width * 0.92;
   const centerY = height * 0.5;
   const startX = (width - usableWidth) * 0.5;
-  const bandGap = height * 0.48 / Math.max(1, CONFIG.BAND_COUNT - 1);
+  const bandGap = height * 0.55 / Math.max(1, CONFIG.BAND_COUNT - 1);
 
   for (let i = 0; i < CONFIG.BAND_COUNT; i += 1) {
     const t = CONFIG.BAND_COUNT === 1 ? 0.5 : i / (CONFIG.BAND_COUNT - 1);
     const offset = (i - (CONFIG.BAND_COUNT - 1) * 0.5) * bandGap;
-    const depth = clamp(1 - Math.abs(t - 0.5) * 1.9, 0.18, 1);
+    const depth = clamp(1 - Math.abs(t - 0.5) * 1.8, 0.22, 1);
     const sideBias = (t - 0.5) * 2;
+    const isLead = i === Math.floor(CONFIG.BAND_COUNT / 2);
 
     bands.push({
       index: i,
@@ -113,23 +119,38 @@ function buildBands() {
       baseX: startX,
       width: usableWidth,
       depth,
-      emphasis: clamp(0.45 + depth * 0.65, 0.45, 1.06),
-      sway: sideBias * 0.6,
+      emphasis: clamp(0.55 + depth * 0.75, 0.55, 1.3),
+      sway: sideBias * 0.4,
       phase: hash01(i + 0.13, t + 0.31),
+      isLead,
+      speedMult: 0.7 + hash01(i + 1.1, t + 0.77) * 0.9,
+      maxExcursion: bandGap * 0.44,
     });
   }
 
   for (let i = 0; i < CONFIG.CROSS_LINKS; i += 1) {
     const pairSeed = hash01(i + 0.4, 0.19);
-    const leftBand = clamp(Math.floor(lerp(1, CONFIG.BAND_COUNT - 2, pairSeed)), 0, CONFIG.BAND_COUNT - 2);
+    const leftBand = clamp(Math.floor(lerp(0, CONFIG.BAND_COUNT - 2, pairSeed)), 0, CONFIG.BAND_COUNT - 2);
     const pairFocus = 1 - Math.abs(((leftBand + 0.5) / (CONFIG.BAND_COUNT - 1)) - 0.5) * 2;
-    const xT = clamp(0.15 + (i + 1) / (CONFIG.CROSS_LINKS + 2) * 0.7 + (hash01(i, pairSeed) - 0.5) * 0.028, 0.08, 0.92);
+    const xT = clamp(0.1 + (i + 1) / (CONFIG.CROSS_LINKS + 2) * 0.8 + (hash01(i, pairSeed) - 0.5) * 0.04, 0.06, 0.94);
     intersections.push({
       leftBand,
       rightBand: leftBand + 1,
-      xT: clamp(xT + (hash01(i, xT) - 0.5) * 0.04, 0.04, 0.96),
+      xT: clamp(xT + (hash01(i, xT) - 0.5) * 0.05, 0.04, 0.96),
       twist: hash01(i + 0.7, xT + 0.2),
       focus: clamp(pairFocus, 0.05, 1),
+      over: hash01(i + 2.3, pairSeed) > 0.5,
+    });
+  }
+
+  for (let i = 0; i < CONFIG.PARTICLE_COUNT; i += 1) {
+    const bandIdx = Math.floor(hash01(i, 3.77) * CONFIG.BAND_COUNT);
+    particles.push({
+      bandIdx: clamp(bandIdx, 0, CONFIG.BAND_COUNT - 1),
+      xT: hash01(i + 0.1, 7.13),
+      speed: (0.4 + hash01(i + 5.5, 2.2) * 0.9) * CONFIG.PARTICLE_SPEED,
+      size: 1.2 + hash01(i + 3.1, 0.88) * 2.2,
+      phase: hash01(i + 8.8, 4.4) * Math.PI * 2,
     });
   }
 }
@@ -154,7 +175,7 @@ function resize() {
   ctx.fillRect(0, 0, width, height);
 }
 
-function drawBackdrop() {
+function drawBackdrop(t, phases) {
   const bg = ctx.createLinearGradient(0, 0, 0, height);
   bg.addColorStop(0, CONFIG.BG_TOP);
   bg.addColorStop(1, CONFIG.BG_BOTTOM);
@@ -162,27 +183,50 @@ function drawBackdrop() {
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
 
-  ctx.fillStyle = `rgba(8, 9, 14, ${CONFIG.TRAIL_ALPHA})`;
+  ctx.fillStyle = `rgba(6, 7, 12, ${CONFIG.TRAIL_ALPHA})`;
+  ctx.fillRect(0, 0, width, height);
+
+  // time-reactive bg pulse — deepens on the minute boundary
+  const minutePulse = Math.pow(Math.sin(phases.minutePhase * Math.PI), 4);
+  const secondPulse = Math.pow(Math.sin(phases.secondPhase * Math.PI), 6);
+  const bgGlow = CONFIG.BG_PULSE_STRENGTH * (minutePulse * 0.6 + secondPulse * 0.4);
+  const hueShift = 220 + phases.hourPhase * 80;
+  if (bgGlow > 0.004) {
+    const pulse = ctx.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, Math.max(width, height) * 0.62);
+    pulse.addColorStop(0, `hsla(${hueShift}, 80%, 60%, ${bgGlow * 0.9})`);
+    pulse.addColorStop(0.5, `hsla(${hueShift + 40}, 70%, 40%, ${bgGlow * 0.35})`);
+    pulse.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = pulse;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // vertical spectrum fog
+  const fog = ctx.createLinearGradient(0, 0, 0, height);
+  fog.addColorStop(0,    `hsla(200, 70%, 50%, 0.035)`);
+  fog.addColorStop(0.35, `hsla(270, 60%, 45%, 0.025)`);
+  fog.addColorStop(0.65, `hsla(320, 65%, 50%, 0.028)`);
+  fog.addColorStop(1,    `hsla(180, 75%, 45%, 0.032)`);
+  ctx.fillStyle = fog;
   ctx.fillRect(0, 0, width, height);
 
   const orb = ctx.createRadialGradient(
     width * 0.5,
-    height * 0.52,
-    Math.min(width, height) * CONFIG.CORE_RADIUS_RATIO * 0.25,
+    height * 0.5,
+    Math.min(width, height) * CONFIG.CORE_RADIUS_RATIO * 0.15,
     width * 0.5,
-    height * 0.52,
-    Math.max(width, height) * 0.55,
+    height * 0.5,
+    Math.max(width, height) * 0.58,
   );
-  orb.addColorStop(0, "rgba(255, 255, 255, 0.04)");
-  orb.addColorStop(0.42, "rgba(40, 36, 68, 0.05)");
+  orb.addColorStop(0, "rgba(255, 255, 255, 0.05)");
+  orb.addColorStop(0.38, "rgba(40, 30, 72, 0.06)");
   orb.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = orb;
   ctx.fillRect(0, 0, width, height);
 
   const edgeFade = ctx.createLinearGradient(0, 0, width, 0);
   edgeFade.addColorStop(0, `rgba(0, 0, 0, ${CONFIG.EDGE_FADE_RATIO})`);
-  edgeFade.addColorStop(0.16, "rgba(0, 0, 0, 0)");
-  edgeFade.addColorStop(0.84, "rgba(0, 0, 0, 0)");
+  edgeFade.addColorStop(0.14, "rgba(0, 0, 0, 0)");
+  edgeFade.addColorStop(0.86, "rgba(0, 0, 0, 0)");
   edgeFade.addColorStop(1, `rgba(0, 0, 0, ${CONFIG.EDGE_FADE_RATIO})`);
   ctx.fillStyle = edgeFade;
   ctx.fillRect(0, 0, width, height);
@@ -193,23 +237,27 @@ function laneY(band, xT, t, phases) {
   const drift = height * CONFIG.WAVE_DRIFT_RATIO;
   const pulse = height * CONFIG.LANE_PULSE_RATIO;
   const focus = 1 - smoothstep(0.05, 0.5, Math.abs(xT - 0.5) * 2);
+  const sp = band.speedMult;
 
-  const slow = Math.sin((xT * Math.PI * 2.1) + t * (0.62 + band.phase * 0.2) + band.index * 0.58);
-  const fast = Math.sin((xT * Math.PI * 4.8) - t * (0.84 + phases.secondPhase * 0.65) + band.phase * 6.6);
+  const slow = Math.sin((xT * Math.PI * 2.1) + t * (0.62 + band.phase * 0.2) * sp + band.index * 0.58);
+  const fast = Math.sin((xT * Math.PI * 4.8) - t * (0.84 + phases.secondPhase * 0.65) * sp + band.phase * 6.6);
+  const macro = Math.sin((xT * Math.PI * 0.9) + t * 0.28 * sp + band.phase * 2.4);
   const shimmer = Math.cos((xT * Math.PI * 1.2) + t * 0.4 + phases.minutePhase * Math.PI * 2);
-  const centerPull = (0.5 - xT) * height * CONFIG.FOCUS_PULL_RATIO * focus * (0.45 + band.depth * 0.75);
-  const roleLift = Math.sin((xT - 0.5) * Math.PI * 4 + band.phase * 5 + t * 0.7) * height * 0.01;
-  const directionalWave = Math.sin((xT * Math.PI * 1.4) + t * 0.5 + band.sway) * height * CONFIG.SWAY_RATIO * band.depth;
-  const asymmetry = (xT - 0.5) * height * CONFIG.SHEAR_RATIO * (0.35 + band.depth) * (0.5 + phases.hourPhase * 0.5);
-
-  return band.baseY
-    + slow * waveScale * (0.5 + band.depth * 0.7)
-    + fast * drift * (0.8 + band.depth * 0.28)
+  const centerPull = (0.5 - xT) * height * CONFIG.FOCUS_PULL_RATIO * focus * (0.5 + band.depth * 0.8);
+  const roleLift = Math.sin((xT - 0.5) * Math.PI * 4 + band.phase * 5 + t * 0.7) * height * 0.014;
+  const directionalWave = Math.sin((xT * Math.PI * 2.0) + t * 0.5 * sp + band.sway) * height * CONFIG.SWAY_RATIO * band.depth;
+  const asymmetry = (xT - 0.5) * height * CONFIG.SHEAR_RATIO * (0.4 + band.depth) * (0.4 + phases.hourPhase * 0.6);  // cancel out the net vertical drift so bands stay centred on average
+  const asymmetryDcCancel = -height * CONFIG.SHEAR_RATIO * (0.4 + band.depth) * (0.5 + phases.hourPhase * 0.5) * 0;
+  const raw = band.baseY
+    + slow * waveScale * (0.55 + band.depth * 0.65)
+    + macro * waveScale * 0.28
+    + fast * drift * (0.75 + band.depth * 0.28)
     + shimmer * pulse * (0.45 + band.t * 0.4)
     + roleLift
     + directionalWave
-    + asymmetry
     + centerPull;
+  // hard-clamp each band to its allocated lane
+  return clamp(raw, band.baseY - band.maxExcursion, band.baseY + band.maxExcursion);
 }
 
 function drawCore(t, phases) {
@@ -254,66 +302,107 @@ function drawCore(t, phases) {
   ctx.restore();
 }
 
-function drawBandBody(band, t, phases) {
+function drawBandBody(band, t, phases, clipAbove, clipBelow) {
   const points = [];
-  const hueBase = (186 + band.t * CONFIG.HUE_SPAN + t * CONFIG.HUE_SHIFT_PER_SECOND) % 360;
-  const bodyWidth = Math.max(1.4, Math.min(width, height) * CONFIG.BODY_WIDTH_RATIO * band.emphasis);
-  const highlightWidth = Math.max(0.7, bodyWidth * CONFIG.HIGHLIGHT_WIDTH_RATIO * 24);
-  const glowWidth = Math.max(2.8, Math.min(width, height) * CONFIG.GLOW_WIDTH_RATIO * (0.48 + band.depth * 0.55));
-  const alpha = 0.2 + band.depth * 0.34 + phases.secondPhase * 0.05;
-  const shadowBlur = Math.max(3, Math.min(width, height) * CONFIG.SHADOW_BLUR_RATIO);
-  const laneShade = band.t < 0.5 ? 0.08 : -0.04;
+  // full-spectrum: each band occupies its own hue region, all 7 together span 0-360
+  const hueBase = (band.t * 360 + t * CONFIG.HUE_SHIFT_PER_SECOND) % 360;
+  const bodyWidth = Math.max(1.6, Math.min(width, height) * CONFIG.BODY_WIDTH_RATIO * band.emphasis);
+  const highlightWidth = Math.max(0.8, bodyWidth * 0.28);
+  const glowWidth = Math.max(3.5, Math.min(width, height) * CONFIG.GLOW_WIDTH_RATIO * (0.5 + band.depth * 0.6));
+  const alpha = 0.24 + band.depth * 0.38 + (band.isLead ? 0.16 : 0);
+  const shadowBlur = Math.max(4, Math.min(width, height) * CONFIG.SHADOW_BLUR_RATIO * (band.isLead ? 1.8 : 1));
 
   for (let i = 0; i <= CONFIG.WEAVE_STEPS; i += 1) {
     const xT = i / CONFIG.WEAVE_STEPS;
-    const xShear = (xT - 0.5) * Math.min(width, height) * CONFIG.SHEAR_RATIO * (band.depth * 0.35);
+    const xShear = (xT - 0.5) * Math.min(width, height) * CONFIG.SHEAR_RATIO * (band.depth * 0.4);
     const x = band.baseX + xT * band.width + xShear;
     const y = laneY(band, xT, t, phases);
-    points.push({ x, y, xT, shade: laneShade + (0.5 - xT) * 0.03 });
+    points.push({ x, y, xT });
   }
 
   ctx.save();
+
+  // weave clipping disabled — bands overlap naturally, each full visible
   ctx.globalCompositeOperation = "source-over";
   ctx.shadowBlur = shadowBlur;
-  ctx.shadowColor = mixHex("#64f1ff", "#ff95c8", band.t, 0.14);
+  ctx.shadowColor = `hsla(${hueBase + 20}, 90%, 70%, 0.18)`;
 
+  // base wide stroke
   ctx.beginPath();
-  points.forEach((point, index) => {
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.strokeStyle = mixHex("#5ddff7", "#d3ffb2", band.t * 0.9 + phases.hourPhase * 0.1, alpha * 0.6);
+  points.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+  ctx.strokeStyle = `hsla(${hueBase}, 80%, 48%, ${alpha * 0.55})`;
   ctx.lineWidth = bodyWidth;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.stroke();
 
+  // bright core
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = mixHex("#a7fff2", "#ffd3ef", band.t * 0.8 + phases.minutePhase * 0.2, alpha * 0.9);
-  ctx.lineWidth = bodyWidth * 0.72;
+  ctx.strokeStyle = `hsla(${hueBase + 15}, 92%, 72%, ${alpha})`;
+  ctx.lineWidth = bodyWidth * 0.48;
   ctx.stroke();
 
+  // specular highlight
   ctx.beginPath();
-  points.forEach((point, index) => {
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.strokeStyle = `hsla(${hueBase}, 78%, ${56 + band.depth * 7}%, ${0.1 + band.depth * 0.16})`;
+  points.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+  ctx.strokeStyle = `hsla(${hueBase + 30}, 95%, 88%, ${0.08 + band.depth * 0.12})`;
   ctx.lineWidth = highlightWidth;
   ctx.stroke();
 
+  // bloom glow
   ctx.beginPath();
-  points.forEach((point, index) => {
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.strokeStyle = `rgba(255, 255, 255, ${0.04 + band.depth * 0.06})`;
+  points.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+  ctx.strokeStyle = `hsla(${hueBase}, 85%, 65%, ${0.06 + band.depth * 0.08})`;
   ctx.lineWidth = glowWidth;
   ctx.globalCompositeOperation = "screen";
   ctx.stroke();
   ctx.globalCompositeOperation = "source-over";
 
+  // lead band gets an extra bright spine
+  if (band.isLead) {
+    ctx.beginPath();
+    points.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+    ctx.strokeStyle = `rgba(255, 255, 255, 0.22)`;
+    ctx.lineWidth = Math.max(0.7, bodyWidth * 0.18);
+    ctx.globalCompositeOperation = "screen";
+    ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  ctx.restore();
   return points;
+}
+
+function drawParticles(t, phases) {
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+
+  particles.forEach((p) => {
+    const band = bands[p.bandIdx];
+    if (!band) return;
+
+    // advance
+    p.xT = (p.xT + p.speed * 0.006) % 1;
+
+    const xT = p.xT;
+    const xShear = (xT - 0.5) * Math.min(width, height) * CONFIG.SHEAR_RATIO * (band.depth * 0.4);
+    const x = band.baseX + xT * band.width + xShear;
+    const y = laneY(band, xT, t, phases);
+    const hue = (band.t * 360 + t * CONFIG.HUE_SHIFT_PER_SECOND + p.phase * 30) % 360;
+    const flicker = 0.55 + 0.45 * Math.sin(t * 6.4 + p.phase);
+    const brightness = 0.5 + band.depth * 0.35;
+
+    const grd = ctx.createRadialGradient(x, y, 0, x, y, p.size * 2.4);
+    grd.addColorStop(0, `hsla(${hue}, 90%, 88%, ${0.7 * flicker * brightness})`);
+    grd.addColorStop(0.4, `hsla(${hue}, 80%, 70%, ${0.3 * flicker * brightness})`);
+    grd.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(x, y, p.size * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.restore();
 }
 
 function drawCrossLinks(t, phases) {
@@ -324,7 +413,11 @@ function drawCrossLinks(t, phases) {
     const a = bands[link.leftBand];
     const b = bands[link.rightBand];
     const xT = link.xT;
-    const x = a.baseX + xT * a.width;
+    const xShearA = (xT - 0.5) * Math.min(width, height) * CONFIG.SHEAR_RATIO * (a.depth * 0.4);
+    const xShearB = (xT - 0.5) * Math.min(width, height) * CONFIG.SHEAR_RATIO * (b.depth * 0.4);
+    const xA = a.baseX + xT * a.width + xShearA;
+    const xB = b.baseX + xT * b.width + xShearB;
+    const x = (xA + xB) * 0.5;
     const yA = laneY(a, xT, t, phases);
     const yB = laneY(b, xT, t, phases);
     const bridge = lerp(yA, yB, 0.5);
@@ -332,26 +425,28 @@ function drawCrossLinks(t, phases) {
     const depthMix = lerp(a.depth, b.depth, 0.5);
     const focus = link.focus;
     const waviness = Math.sin(t * 1.35 + link.twist * Math.PI * 3.6 + index * 0.3);
-    const lift = span * (0.18 + link.twist * 0.14) * waviness;
-    const alpha = (0.1 + depthMix * 0.08) * (0.45 + focus * 0.8);
-    const linkWidth = Math.max(0.85, Math.min(width, height) * 0.0029 * (0.8 + depthMix * 0.5));
+    const lift = span * (0.22 + link.twist * 0.16) * waviness;
+    const alpha = (0.14 + depthMix * 0.1) * (0.5 + focus * 0.85);
+    const linkWidth = Math.max(0.9, Math.min(width, height) * 0.0034 * (0.9 + depthMix * 0.55));
+    const hueA = (a.t * 360 + t * CONFIG.HUE_SHIFT_PER_SECOND) % 360;
+    const hueB = (b.t * 360 + t * CONFIG.HUE_SHIFT_PER_SECOND) % 360;
+    const hueMid = (hueA + hueB) * 0.5;
 
-    ctx.shadowBlur = Math.max(2, Math.min(width, height) * 0.006 * focus);
-    ctx.shadowColor = mixHex("#a9fbff", "#ffaad8", link.twist, alpha * 0.5);
-    ctx.strokeStyle = mixHex("#a9fbff", "#ff8ec0", link.twist * 0.9 + focus * 0.1, alpha);
+    ctx.shadowBlur = Math.max(3, Math.min(width, height) * 0.008 * focus);
+    ctx.shadowColor = `hsla(${hueMid}, 90%, 75%, ${alpha * 0.6})`;
+    ctx.strokeStyle = `hsla(${hueMid + 12}, 88%, 70%, ${alpha})`;
     ctx.lineWidth = linkWidth;
     ctx.beginPath();
-    ctx.moveTo(x - 10, bridge - lift * 0.08);
-    ctx.quadraticCurveTo(x, bridge + lift * 0.62, x + 10, bridge - lift * 0.08);
+    ctx.moveTo(x - 12, bridge - lift * 0.1);
+    ctx.quadraticCurveTo(x, bridge + lift * 0.68, x + 12, bridge - lift * 0.1);
     ctx.stroke();
 
-    if (hash01(index, xT, t) < CONFIG.SPARK_RATE * (0.5 + focus)) {
-      const sparkSize = Math.max(0.9, linkWidth * 1.2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${CONFIG.SPARK_ALPHA * (0.35 + depthMix * 0.4)})`;
-      ctx.beginPath();
-      ctx.arc(x, bridge + lift * 0.08, sparkSize, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // always draw a tight centre dot at the stitch point
+    const dotAlpha = alpha * (0.6 + depthMix * 0.5);
+    ctx.fillStyle = `hsla(${hueMid}, 95%, 85%, ${dotAlpha})`;
+    ctx.beginPath();
+    ctx.arc(x, bridge + lift * 0.1, Math.max(1, linkWidth * 1.4), 0, Math.PI * 2);
+    ctx.fill();
   });
 
   ctx.restore();
@@ -382,16 +477,21 @@ function draw(time) {
   const t = (time - startTime) * 0.001;
   const phases = getTimePhases(new Date());
 
-  drawBackdrop();
+  drawBackdrop(t, phases);
 
   drawCore(t, phases);
 
+  // paint bands back-to-front; middle bands (deepest) paint on top
   const orderedBands = [...bands].sort((a, b) => a.depth - b.depth || a.index - b.index);
-  for (let i = 0; i < orderedBands.length; i += 1) {
-    drawBandBody(orderedBands[i], t, phases);
-  }
+  orderedBands.forEach((band, i) => {
+    const above = i > 0 ? orderedBands[i - 1] : null;
+    const below = i < orderedBands.length - 1 ? orderedBands[i + 1] : null;
+    drawBandBody(band, t, phases, above, below);
+  });
 
   drawCrossLinks(t, phases);
+
+  drawParticles(t, phases);
 
   rafId = requestAnimationFrame(draw);
 }
@@ -426,4 +526,5 @@ export function destroy() {
   onResize = null;
   bands = [];
   intersections = [];
+  particles = [];
 }
