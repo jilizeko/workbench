@@ -8,37 +8,39 @@ let height = 0;
 let startTime = 0;
 
 let bands = [];
+let ghostBands = [];
 let intersections = [];
 let particles = [];
 
 const CONFIG = {
   BG_TOP: "#030508",
   BG_BOTTOM: "#0d0916",
-  BAND_COUNT: 5,
-  WEAVE_STEPS: 72,
-  CROSS_LINKS: 16,
-  BODY_WIDTH_RATIO: 0.028,
-  HIGHLIGHT_WIDTH_RATIO: 0.008,
-  GLOW_WIDTH_RATIO: 0.055,
+  BAND_COUNT: 122,
+  GHOST_BAND_COUNT: 124,
+  WEAVE_STEPS: 7,
+  CROSS_LINKS: 10,
+  BODY_WIDTH_RATIO: 0.008,
+  HIGHLIGHT_WIDTH_RATIO: 0.0035,
+  GLOW_WIDTH_RATIO: 0.018,
   TRAIL_ALPHA: 0.065,
   ORBIT_ALPHA: 0.13,
   SPARK_ALPHA: 0.28,
   SPARK_RATE: 0.1,
   CORE_RADIUS_RATIO: 0.18,
   KNOT_RADIUS_RATIO: 0.11,
-  WAVE_SCALE_RATIO: 0.055,
+  WAVE_SCALE_RATIO: 0.042,
   WAVE_DRIFT_RATIO: 0.022,
-  LANE_PULSE_RATIO: 0.01,
+  LANE_PULSE_RATIO: 0.007,
   SHADOW_BLUR_RATIO: 0.018,
   HUE_SPAN: 340,
   HUE_SHIFT_PER_SECOND: 14,
   FOCUS_PULL_RATIO: 0.05,
   EDGE_FADE_RATIO: 0.18,
   SHEAR_RATIO: 0.055,
-  SWAY_RATIO: 0.016,
+  SWAY_RATIO: 0.012,
   KNOT_TILT_RATIO: 0.34,
   CORE_PULSE_RATIO: 0.15,
-  PARTICLE_COUNT: 60,
+  PARTICLE_COUNT: 42,
   PARTICLE_SPEED: 0.28,
   BG_PULSE_STRENGTH: 0.06,
 };
@@ -97,18 +99,19 @@ function hash01(a, b, c = 0) {
 
 function buildBands() {
   bands = [];
+  ghostBands = [];
   intersections = [];
   particles = [];
 
   const usableWidth = width * 0.92;
   const centerY = height * 0.5;
   const startX = (width - usableWidth) * 0.5;
-  const bandGap = height * 0.55 / Math.max(1, CONFIG.BAND_COUNT - 1);
+  const bandGap = height * 0.72 / Math.max(1, CONFIG.BAND_COUNT - 1);
 
   for (let i = 0; i < CONFIG.BAND_COUNT; i += 1) {
     const t = CONFIG.BAND_COUNT === 1 ? 0.5 : i / (CONFIG.BAND_COUNT - 1);
     const offset = (i - (CONFIG.BAND_COUNT - 1) * 0.5) * bandGap;
-    const depth = clamp(1 - Math.abs(t - 0.5) * 1.8, 0.22, 1);
+    const depth = clamp(1 - Math.abs(t - 0.5) * 1.8, 0.34, 1);
     const sideBias = (t - 0.5) * 2;
     const isLead = i === Math.floor(CONFIG.BAND_COUNT / 2);
 
@@ -119,12 +122,35 @@ function buildBands() {
       baseX: startX,
       width: usableWidth,
       depth,
-      emphasis: clamp(0.55 + depth * 0.75, 0.55, 1.3),
+      emphasis: clamp(0.42 + depth * 0.48, 0.42, 0.95),
       sway: sideBias * 0.4,
       phase: hash01(i + 0.13, t + 0.31),
       isLead,
       speedMult: 0.7 + hash01(i + 1.1, t + 0.77) * 0.9,
-      maxExcursion: bandGap * 0.44,
+      maxExcursion: bandGap * 0.9,
+    });
+  }
+
+  const ghostGap = height * 0.86 / Math.max(1, CONFIG.GHOST_BAND_COUNT - 1);
+  for (let i = 0; i < CONFIG.GHOST_BAND_COUNT; i += 1) {
+    const t = CONFIG.GHOST_BAND_COUNT === 1 ? 0.5 : i / (CONFIG.GHOST_BAND_COUNT - 1);
+    const offset = (i - (CONFIG.GHOST_BAND_COUNT - 1) * 0.5) * ghostGap;
+    const depth = clamp(1 - Math.abs(t - 0.5) * 1.1, 0.45, 1);
+    const sideBias = (t - 0.5) * 2;
+
+    ghostBands.push({
+      index: i,
+      t,
+      baseY: centerY + offset,
+      baseX: startX,
+      width: usableWidth,
+      depth,
+      sway: sideBias * 0.22,
+      phase: hash01(i + 10.13, t + 5.31),
+      speedMult: 0.45 + hash01(i + 2.8, t + 1.9) * 0.55,
+      maxExcursion: ghostGap * 0.72,
+      widthScale: 0.75 + hash01(i + 8.1, t + 3.2) * 0.75,
+      alphaScale: 0.55 + hash01(i + 1.9, t + 6.7) * 0.6,
     });
   }
 
@@ -246,8 +272,6 @@ function laneY(band, xT, t, phases) {
   const centerPull = (0.5 - xT) * height * CONFIG.FOCUS_PULL_RATIO * focus * (0.5 + band.depth * 0.8);
   const roleLift = Math.sin((xT - 0.5) * Math.PI * 4 + band.phase * 5 + t * 0.7) * height * 0.014;
   const directionalWave = Math.sin((xT * Math.PI * 2.0) + t * 0.5 * sp + band.sway) * height * CONFIG.SWAY_RATIO * band.depth;
-  const asymmetry = (xT - 0.5) * height * CONFIG.SHEAR_RATIO * (0.4 + band.depth) * (0.4 + phases.hourPhase * 0.6);  // cancel out the net vertical drift so bands stay centred on average
-  const asymmetryDcCancel = -height * CONFIG.SHEAR_RATIO * (0.4 + band.depth) * (0.5 + phases.hourPhase * 0.5) * 0;
   const raw = band.baseY
     + slow * waveScale * (0.55 + band.depth * 0.65)
     + macro * waveScale * 0.28
@@ -257,6 +281,15 @@ function laneY(band, xT, t, phases) {
     + directionalWave
     + centerPull;
   // hard-clamp each band to its allocated lane
+  return clamp(raw, band.baseY - band.maxExcursion, band.baseY + band.maxExcursion);
+}
+
+function laneYGhost(band, xT, t, phases) {
+  const macro = Math.sin((xT * Math.PI * 1.35) + t * (0.24 + phases.hourPhase * 0.12) * band.speedMult + band.phase * 2.2);
+  const soft = Math.cos((xT * Math.PI * 2.4) - t * (0.32 + phases.minutePhase * 0.3) * band.speedMult + band.phase * 5.4);
+  const sway = Math.sin((xT * Math.PI * 2) + t * 0.22 + band.sway);
+  const amp = height * 0.075 * band.depth;
+  const raw = band.baseY + macro * amp * 0.72 + soft * amp * 0.38 + sway * height * 0.018;
   return clamp(raw, band.baseY - band.maxExcursion, band.baseY + band.maxExcursion);
 }
 
@@ -373,6 +406,49 @@ function drawBandBody(band, t, phases, clipAbove, clipBelow) {
   return points;
 }
 
+function drawGhostWaves(t, phases) {
+  const minDim = Math.min(width, height);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+
+  ghostBands.forEach((band) => {
+    const points = [];
+    const hue = (band.t * 300 + 35 + t * (CONFIG.HUE_SHIFT_PER_SECOND * 0.35)) % 360;
+    const waveWidth = Math.max(16, minDim * 0.052 * band.widthScale);
+    const alpha = (0.03 + band.depth * 0.035) * band.alphaScale;
+
+    for (let i = 0; i <= CONFIG.WEAVE_STEPS; i += 1) {
+      const xT = i / CONFIG.WEAVE_STEPS;
+      const x = band.baseX + xT * band.width;
+      const y = laneYGhost(band, xT, t, phases);
+      points.push({ x, y });
+    }
+
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.strokeStyle = `hsla(${hue}, 80%, 68%, ${alpha})`;
+    ctx.lineWidth = waveWidth;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.strokeStyle = `hsla(${hue + 28}, 78%, 82%, ${alpha * 0.55})`;
+    ctx.lineWidth = waveWidth * 0.42;
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
+
 function drawParticles(t, phases) {
   ctx.save();
   ctx.globalCompositeOperation = "screen";
@@ -478,6 +554,7 @@ function draw(time) {
   const phases = getTimePhases(new Date());
 
   drawBackdrop(t, phases);
+  drawGhostWaves(t, phases);
 
   drawCore(t, phases);
 
@@ -525,6 +602,7 @@ export function destroy() {
   rafId = null;
   onResize = null;
   bands = [];
+  ghostBands = [];
   intersections = [];
   particles = [];
 }
