@@ -17,8 +17,8 @@ const CONFIG = {
   BG_TOP: "#05070c",
   BG_BOTTOM: "#100d16",
   TRAIL_ALPHA: 0.12,
-  GLOW_ALPHA: 0.22,
-  BASE_LINE_WIDTH: 1.1,
+  GLOW_ALPHA: 0.28,
+  BASE_LINE_WIDTH: 1.2,
   NODE_DENSITY: 0.11,
 };
 
@@ -104,50 +104,63 @@ function drawBackdrop() {
   ctx.fillRect(0, 0, width, height);
 }
 
+function strandPoint(index, i, t, phases) {
+  const strandT = index / Math.max(1, CONFIG.STRANDS - 1);
+  const tt = CONFIG.POINTS_PER_STRAND === 1 ? 0 : i / (CONFIG.POINTS_PER_STRAND - 1);
+  const columnIndex = clamp(Math.round(tt * (columns.length - 1)), 0, columns.length - 1);
+  const col = columns[columnIndex];
+  const rowIndex = clamp(Math.floor(strandT * (col.length - 1)), 0, col.length - 1);
+  const anchor = col[rowIndex];
+
+  const wobbleAmp = lerp(width, height, 0.5) * (0.055 + phases.hourPhase * 0.06);
+  const phaseA = t * (0.52 + phases.minutePhase * 0.75) + strandT * 10;
+  const phaseB = t * (0.76 + phases.secondPhase * 1.7) + strandT * 7;
+
+  const bend1 = Math.sin(tt * Math.PI * 2 + phaseA + anchor.seed) * wobbleAmp;
+  const bend2 = Math.cos(tt * Math.PI * 4 + phaseB + anchor.seed * 0.7) * wobbleAmp * 0.6;
+  // cross-strand vertical drift — lets strands wander into each other's bands
+  const crossDrift = Math.sin(phaseA * 0.31 + anchor.seed * 1.7) * (height * 0.048);
+  const drift = Math.sin(phaseB * 0.4 + tt * 9) * (height * 0.018);
+
+  return {
+    x: anchor.x + bend1,
+    y: anchor.y + bend2 + drift + crossDrift,
+    anchor,
+  };
+}
+
 function drawStrand(index, t, phases) {
   const strandT = index / Math.max(1, CONFIG.STRANDS - 1);
-  const hue = 190 + strandT * 160 + Math.sin(t * 0.2 + strandT * 4.3) * 12;
-  const sat = 70 + phases.minutePhase * 20;
+  // full-spectrum hue: spread across 0–360 so all strands together read as a prism
+  const hue = (strandT * 360 + t * 8 + Math.sin(t * 0.2 + strandT * 4.3) * 18) % 360;
+  const sat = 72 + phases.minutePhase * 18;
   const light = 56 + Math.sin(t * 0.75 + strandT * 8) * 8;
-  const alpha = 0.26 + phases.secondPhase * 0.36;
+  const alpha = 0.32 + phases.secondPhase * 0.32;
 
-  const wobbleAmp = lerp(width, height, 0.5) * (0.018 + phases.hourPhase * 0.022);
-  const phaseA = t * (0.42 + phases.minutePhase * 0.75) + strandT * 10;
-  const phaseB = t * (0.66 + phases.secondPhase * 1.7) + strandT * 7;
-
+  // --- pass 1: continuous stroke (no beginPath inside the loop) ---
   ctx.beginPath();
-
   for (let i = 0; i < CONFIG.POINTS_PER_STRAND; i += 1) {
-    const tt = CONFIG.POINTS_PER_STRAND === 1 ? 0 : i / (CONFIG.POINTS_PER_STRAND - 1);
-    const columnIndex = clamp(Math.round(tt * (columns.length - 1)), 0, columns.length - 1);
-    const col = columns[columnIndex];
-    const rowIndex = clamp(Math.floor(strandT * (col.length - 1)), 0, col.length - 1);
-    const anchor = col[rowIndex];
-
-    const bend1 = Math.sin(tt * Math.PI * 2 + phaseA + anchor.seed) * wobbleAmp;
-    const bend2 = Math.cos(tt * Math.PI * 4 + phaseB + anchor.seed * 0.7) * wobbleAmp * 0.5;
-    const drift = Math.sin(phaseB * 0.4 + tt * 9) * (height * 0.012);
-
-    const x = anchor.x + bend1;
-    const y = anchor.y + bend2 + drift;
-
+    const { x, y } = strandPoint(index, i, t, phases);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
-
-    if (Math.random() < CONFIG.NODE_DENSITY) {
-      const glow = 1.2 + Math.random() * 1.8;
-      ctx.fillStyle = hsl(hue, sat, Math.min(90, light + 12), CONFIG.GLOW_ALPHA);
-      ctx.beginPath();
-      ctx.arc(x, y, glow, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    }
   }
-
   ctx.strokeStyle = hsl(hue, sat, light, alpha);
   ctx.lineWidth = CONFIG.BASE_LINE_WIDTH + Math.sin(strandT * 12 + t * 0.9) * 0.35;
   ctx.stroke();
+
+  // --- pass 2: glow nodes using deterministic hash (no Math.random → no flicker) ---
+  for (let i = 0; i < CONFIG.POINTS_PER_STRAND; i += 1) {
+    const { x, y, anchor } = strandPoint(index, i, t, phases);
+    // pseudo-random per-point, stable across frames
+    const nodeHash = (Math.sin(anchor.seed * 127.1 + i * 311.7) * 0.5 + 0.5);
+    if (nodeHash < CONFIG.NODE_DENSITY) {
+      const glow = 1.1 + nodeHash * 2.2;
+      ctx.beginPath();
+      ctx.arc(x, y, glow, 0, Math.PI * 2);
+      ctx.fillStyle = hsl(hue, sat, Math.min(92, light + 16), CONFIG.GLOW_ALPHA);
+      ctx.fill();
+    }
+  }
 }
 
 function draw(time) {
