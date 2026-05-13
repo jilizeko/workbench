@@ -44,6 +44,13 @@ let gpuRebuildInFlight = null;
 let gpuAgentCount = 0;
 let relationTableSize = 0;
 let gpuConnectionsBroken = false;
+let gpuDecayStep = 0;
+let gpuDecayStart = 0;
+let gpuDecayCount = 0;
+let relationDecayCursor = 0;
+let lastFrameMs = 0;
+let frameDecayMs = 0, frameClearMs = 0, frameBuildMs = 0, frameSimMs = 0, frameRenderMs = 0;
+let fpsSmoothed = 60;
 
 // GPU constants
 const GRID_MAX_CELLS = 16384;
@@ -76,6 +83,7 @@ const CONTROL_HINTS = {
 const PANEL_WIDTH_KEY = "social-field-panel-width";
 const PANEL_BOUNDS_KEY = "social-field-panel-bounds";
 const PRESETS_KEY = "social-field-presets";
+const PRESET_SCHEMA_VERSION = 2;
 
 const INTEGER_CONFIG_KEYS = new Set([
   "INITIAL_AGENT_COUNT", "VISION_RADIUS", "MAX_RELATIONSHIP",
@@ -207,36 +215,94 @@ function createAgent(x, y) {
 }
 
 // ─── CPU: presets ────────────────────────────────────────────────────────────
-function getPresets() {
-  try {
-    const raw = localStorage.getItem(PRESETS_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch (_) { return {}; }
+function sanitizeConfigSnapshot(rawConfig) {
+  const clean = {};
+  for (const key of Object.keys(DEFAULT_SOCIAL_FIELD_CONFIG)) {
+    if (rawConfig && key in rawConfig) clean[key] = rawConfig[key];
+  }
+  return clean;
 }
 
-function savePreset(name, config) {
+function readPresetStore() {
   try {
-    const presets = getPresets();
-    presets[name] = config;
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+    const raw = localStorage.getItem(PRESETS_KEY);
+    if (!raw) {
+      return { version: PRESET_SCHEMA_VERSION, presets: {} };
+    }
+
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.version === PRESET_SCHEMA_VERSION && parsed.presets && typeof parsed.presets === "object") {
+      return parsed;
+    }
+
+    // Backward compatibility: old format was { [name]: configObject }
+    const migratedPresets = {};
+    if (parsed && typeof parsed === "object") {
+      for (const [name, value] of Object.entries(parsed)) {
+        migratedPresets[name] = {
+          config: sanitizeConfigSnapshot(value),
+          ui: {},
+          meta: { migrated: true }
+        };
+      }
+    }
+
+    const migratedStore = { version: PRESET_SCHEMA_VERSION, presets: migratedPresets };
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(migratedStore));
+    return migratedStore;
+  } catch (_) {
+    return { version: PRESET_SCHEMA_VERSION, presets: {} };
+  }
+}
+
+function getPresets() {
+  return readPresetStore().presets;
+}
+
+function savePreset(name, config, uiState = {}) {
+  try {
+    const store = readPresetStore();
+    store.presets[name] = {
+      config: sanitizeConfigSnapshot(config),
+      ui: {
+        panelWidth: Number.isFinite(uiState.panelWidth) ? uiState.panelWidth : undefined,
+        bounds: uiState.bounds && typeof uiState.bounds === "object" ? uiState.bounds : undefined,
+      },
+      meta: { updatedAt: Date.now() }
+    };
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(store));
   } catch (_) {}
 }
 
-function loadPreset(name, presets) {
+function loadPreset(name) {
+  const presets = getPresets();
   const p = presets[name];
-  if (p) {
-    Object.assign(CONFIG, p);
-    saveSocialFieldConfig(CONFIG);
-    return true;
+  if (!p) return false;
+
+  const configSnapshot = (p.config && typeof p.config === "object") ? p.config : p;
+  Object.assign(CONFIG, sanitizeConfigSnapshot(configSnapshot));
+  saveSocialFieldConfig(CONFIG);
+
+  const ui = p.ui && typeof p.ui === "object" ? p.ui : null;
+  if (ui) {
+    try {
+      if (Number.isFinite(ui.panelWidth)) {
+        localStorage.setItem(PANEL_WIDTH_KEY, String(Math.min(520, Math.max(120, Math.round(ui.panelWidth)))));
+      }
+      if (ui.bounds && typeof ui.bounds === "object") {
+        localStorage.setItem(PANEL_BOUNDS_KEY, JSON.stringify(ui.bounds));
+      }
+    } catch (_) {}
   }
-  return false;
+
+  return true;
 }
 
 function deletePreset(name) {
   try {
-    const presets = getPresets();
-    delete presets[name];
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+    const store = readPresetStore();
+    delete store.presets[name];
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(store));
   } catch (_) {}
 }
 
@@ -606,6 +672,15 @@ function computeRelationTableSize(count) {
   return Math.min(REL_TABLE_MAX_SIZE, nextPowerOfTwo(target));
 }
 
+function computeRelationProbeCount(count) {
+  const expectedActive = Math.max(1, count * 24);
+  const load = expectedActive / Math.max(1, relationTableSize);
+  if (load < 0.20) return 8;
+  if (load < 0.35) return 12;
+  if (load < 0.50) return 16;
+  return 24;
+}
+
 // ─── GPU: compute shader ─────────────────────────────────────────────────────
 function getComputeShader() {
   return `
@@ -660,6 +735,8 @@ struct SimParams {
    relationValueScale : f32,
    relationTableMask : u32,
    relationProbeCount : u32,
+   decayStart : u32,
+   decayCount : u32,
 }
 
 @group(0) @binding(0) var<storage, read> srcAgents : array<AgentState>;
@@ -757,7 +834,8 @@ fn readRelationship(slot : i32) -> f32 {
 
 @compute @workgroup_size(128)
 fn decayRelations(@builtin(global_invocation_id) gid : vec3<u32>) {
-  let i = gid.x;
+  if (gid.x >= params.decayCount) { return; }
+  let i = params.decayStart + gid.x;
   if (i > params.relationTableMask) { return; }
 
   let key = atomicLoad(&relKeys[i]);
@@ -1147,14 +1225,27 @@ function writeSimUniforms(dt) {
   const u32 = new Uint32Array(data);
 
   let decayAmount = 0;
+  gpuDecayStart = 0;
+  gpuDecayCount = 0;
   if (CONFIG.RELATIONSHIP_DECAY > 0) {
     decayAccumulator += dt;
     const batchSec = CONFIG.DECAY_BATCH_INTERVAL / 60;
     if (decayAccumulator >= batchSec) {
       decayAmount = CONFIG.RELATIONSHIP_DECAY * decayAccumulator;
       decayAccumulator = 0;
+
+      const chunkSize = Math.max(4096, Math.floor(relationTableSize / 16));
+      gpuDecayCount = Math.min(Math.max(1, relationTableSize), chunkSize);
+      gpuDecayStart = relationDecayCursor;
+
+      const sweepFactor = relationTableSize / Math.max(1, gpuDecayCount);
+      decayAmount *= sweepFactor;
+
+      relationDecayCursor += gpuDecayCount;
+      if (relationDecayCursor >= relationTableSize) relationDecayCursor = 0;
     }
   }
+  gpuDecayStep = Math.max(0, Math.round(decayAmount * RELATION_VALUE_SCALE));
 
   f32[0] = dt;
   u32[1] = count;
@@ -1173,7 +1264,8 @@ function writeSimUniforms(dt) {
 
   u32[12] = 4;
   u32[13] = GRID_MAX_CELL_CAPACITY;
-  u32[14] = GRID_MAX_CELL_CAPACITY * 9;
+  const maxNeighborsLimit = count > 40000 ? 48 : (count > 30000 ? 64 : (count > 20000 ? 96 : 192));
+  u32[14] = maxNeighborsLimit;
   u32[15] = grid.count;
 
   const aspectsEnabled = CONFIG.ENABLE_ASPECTS || (
@@ -1204,7 +1296,9 @@ function writeSimUniforms(dt) {
   f32[31] = CONFIG.BOUNDARY_CURVE;
   f32[32] = RELATION_VALUE_SCALE;
   u32[33] = Math.max(1, relationTableSize) - 1;
-  u32[34] = 32;
+  u32[34] = computeRelationProbeCount(count);
+  u32[35] = gpuDecayStart >>> 0;
+  u32[36] = gpuDecayCount >>> 0;
 
   device.queue.writeBuffer(simUniformBuffer, 0, data);
 }
@@ -1237,7 +1331,7 @@ function writeConnectionUniforms(count, pairOffset, pairStride) {
   f32[4] = CONFIG.CONNECTION_ALPHA_MAX;
   f32[5] = RELATION_VALUE_SCALE;
   u32[6] = Math.max(1, relationTableSize) - 1;
-  u32[7] = 32;
+  u32[7] = computeRelationProbeCount(count);
   u32[8] = count;
   u32[9] = pairOffset >>> 0;
   f32[10] = Math.min(0.999, Math.max(0, CONFIG.CONNECTION_MIN_RELATION_NORM || 0));
@@ -1571,6 +1665,10 @@ function releaseGpu() {
   gpuAgentCount = 0;
   relationTableSize = 0;
   gpuConnectionsBroken = false;
+  gpuDecayStep = 0;
+  gpuDecayStart = 0;
+  gpuDecayCount = 0;
+  relationDecayCursor = 0;
   device = null;
   gpuContext = null;
   useGpu = false;
@@ -1580,43 +1678,56 @@ function releaseGpu() {
 function simulateGpu(dt) {
   if (!useGpu || !device) return;
 
+  const t0 = performance.now();
   writeSimUniforms(dt);
   writeRenderUniforms();
 
   const count = Math.max(1, gpuAgentCount || getConfiguredAgentCount());
-  const totalPairs = Math.floor((count * (count - 1)) / 2);
-  const pairCountForDraw = Math.max(0, Math.min(totalPairs, MAX_GPU_CONNECTION_PAIRS));
-  const pairOffset = 0;
-  const pairStride = totalPairs > pairCountForDraw && pairCountForDraw > 0
-    ? Math.max(1, Math.floor(totalPairs / pairCountForDraw))
-    : 1;
-  writeConnectionUniforms(count, pairOffset, pairStride);
+  let pairCountForDraw = 0;
+  if (!gpuConnectionsBroken && CONFIG.SHOW_CONNECTIONS && count > 1 && connectionPipeline && connectionBindGroups.length === 2) {
+    const totalPairs = Math.floor((count * (count - 1)) / 2);
+    pairCountForDraw = Math.max(0, Math.min(totalPairs, MAX_GPU_CONNECTION_PAIRS));
+    if (pairCountForDraw > 0) {
+      const pairOffset = 0;
+      const pairStride = totalPairs > pairCountForDraw
+        ? Math.max(1, Math.floor(totalPairs / pairCountForDraw))
+        : 1;
+      writeConnectionUniforms(count, pairOffset, pairStride);
+    }
+  }
   const grid = computeGridSize();
   const encoder = device.createCommandEncoder();
+  let t1 = t0;
 
-  const decayPass = encoder.beginComputePass();
-  decayPass.setPipeline(decayPipeline);
-  decayPass.setBindGroup(0, computeBindGroups[activeIndex]);
-  decayPass.dispatchWorkgroups(Math.ceil(Math.max(1, relationTableSize) / 128));
-  decayPass.end();
+  if (gpuDecayStep > 0 && gpuDecayCount > 0) {
+    const decayPass = encoder.beginComputePass();
+    decayPass.setPipeline(decayPipeline);
+    decayPass.setBindGroup(0, computeBindGroups[activeIndex]);
+    decayPass.dispatchWorkgroups(Math.ceil(gpuDecayCount / 128));
+    decayPass.end();
+  }
+  frameDecayMs = performance.now() - t1;
 
   const clearPass = encoder.beginComputePass();
   clearPass.setPipeline(clearPipeline);
   clearPass.setBindGroup(0, computeBindGroups[activeIndex]);
   clearPass.dispatchWorkgroups(Math.ceil(grid.count / 128));
   clearPass.end();
+  frameClearMs = performance.now() - t1; t1 = performance.now();
 
   const buildPass = encoder.beginComputePass();
   buildPass.setPipeline(buildPipeline);
   buildPass.setBindGroup(0, computeBindGroups[activeIndex]);
   buildPass.dispatchWorkgroups(Math.ceil(count / 128));
   buildPass.end();
+  frameBuildMs = performance.now() - t1; t1 = performance.now();
 
   const simPass = encoder.beginComputePass();
   simPass.setPipeline(simulatePipeline);
   simPass.setBindGroup(0, computeBindGroups[activeIndex]);
   simPass.dispatchWorkgroups(Math.ceil(count / 128));
   simPass.end();
+  frameSimMs = performance.now() - t1; t1 = performance.now();
 
   const bg = hexToRgba("#2b2622");
   const view = gpuContext.getCurrentTexture().createView();
@@ -1634,15 +1745,15 @@ function simulateGpu(dt) {
   renderPass.draw(6, count);
 
   if (!gpuConnectionsBroken && CONFIG.SHOW_CONNECTIONS && count > 1 && connectionPipeline && connectionBindGroups.length === 2) {
-    const pairCount = Math.max(0, Math.min(totalPairs, MAX_GPU_CONNECTION_PAIRS));
-    if (pairCount > 0) {
+    if (pairCountForDraw > 0) {
       renderPass.setPipeline(connectionPipeline);
       renderPass.setBindGroup(0, connectionBindGroups[1 - activeIndex]);
-      renderPass.draw(2, pairCount);
+      renderPass.draw(2, pairCountForDraw);
     }
   }
 
   renderPass.end();
+  frameRenderMs = performance.now() - t1;
 
   try {
     device.queue.submit([encoder.finish()]);
@@ -1655,6 +1766,10 @@ function simulateGpu(dt) {
     throw e;
   }
   activeIndex = 1 - activeIndex;
+  
+  const frameTime = performance.now() - t0;
+  lastFrameMs = frameTime;
+  fpsSmoothed = fpsSmoothed * 0.9 + (1000 / Math.max(1, frameTime)) * 0.1;
 }
 
 // ─── unified resize ─────────────────────────────────────────────────────────
@@ -1887,6 +2002,15 @@ function buildPanel() {
   modeDiv.appendChild(modeLabel);
   controlsRoot.appendChild(modeDiv);
 
+  // Profiler display for GPU timings
+  const profilerDiv = document.createElement("div");
+  profilerDiv.className = "mode-label";
+  profilerDiv.id = "sf-profiler";
+  profilerDiv.style.fontSize = "7px";
+  profilerDiv.style.fontFamily = "monospace";
+  profilerDiv.style.color = "var(--sf-mute)";
+  controlsRoot.appendChild(profilerDiv);
+
   const savedWidthRaw = localStorage.getItem(PANEL_WIDTH_KEY);
   const savedWidth = savedWidthRaw ? Number(savedWidthRaw) : 0;
   const panelWidth = Number.isFinite(savedWidth) && savedWidth >= 140 && savedWidth <= 420
@@ -2117,7 +2241,10 @@ function buildPanel() {
   btnSavePreset.addEventListener("click", () => {
     const name = presetNameInput.value.trim();
     if (name) {
-      savePreset(name, { ...CONFIG });
+      savePreset(name, { ...CONFIG }, {
+        panelWidth: currentPanelWidth,
+        bounds: boundsStore,
+      });
       presetNameInput.value = "";
       updatePresetsSelect();
     }
@@ -2134,7 +2261,7 @@ function buildPanel() {
   btnLoadPreset.addEventListener("click", () => {
     const name = presetsSelect.value;
     if (name) {
-      loadPreset(name, getPresets());
+      loadPreset(name);
       destroyPanel();
       buildPanel();
     }
@@ -2230,6 +2357,14 @@ function frame(timestamp) {
   } else {
     simulateCpu(dt);
     drawCpu();
+  }
+
+  // Update profiler display
+  const profilerEl = document.getElementById("sf-profiler");
+  if (profilerEl && useGpu) {
+    const fps = Math.round(fpsSmoothed);
+    const total = Math.round((frameDecayMs + frameClearMs + frameBuildMs + frameSimMs + frameRenderMs) * 100) / 100;
+    profilerEl.textContent = `${fps} fps | decay:${Math.round(frameDecayMs*10)/10}ms clear:${Math.round(frameClearMs*10)/10}ms build:${Math.round(frameBuildMs*10)/10}ms sim:${Math.round(frameSimMs*10)/10}ms`;
   }
 
   rafId = requestAnimationFrame(frame);
