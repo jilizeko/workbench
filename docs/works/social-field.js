@@ -1054,18 +1054,17 @@ fn vsMain(@builtin(vertex_index) vertexIndex : u32, @builtin(instance_index) ins
   let py = rp.pointSize * scale * 2.0 * rp.invHeight;
   let offset = offsets[vertexIndex] * vec2<f32>(px, py);
 
-  let hue = tr.aspects.y * 6.2831853;
-  let palette = vec3<f32>(
-    0.5 + 0.5 * cos(hue),
-    0.5 + 0.5 * cos(hue - 2.0943951),
-    0.5 + 0.5 * cos(hue + 2.0943951)
+  // Aspect A -> R, Aspect B -> G, Aspect C -> B
+  let color = vec3<f32>(
+    clamp(tr.aspects.x, 0.0, 1.0),
+    clamp(tr.aspects.y, 0.0, 1.0),
+    clamp(tr.aspects.z, 0.0, 1.0)
   );
-  let brightness = clamp(0.55 + tr.aspects.z * 0.6, 0.2, 1.0);
 
   var out : VsOut;
   out.position = vec4<f32>(center + offset, 0.0, 1.0);
   out.localUv = offsets[vertexIndex];
-  out.color = palette * brightness;
+  out.color = color;
   return out;
 }
 
@@ -1073,10 +1072,8 @@ fn vsMain(@builtin(vertex_index) vertexIndex : u32, @builtin(instance_index) ins
 fn fsMain(in : VsOut) -> @location(0) vec4<f32> {
   let r = length(in.localUv);
   if (r > 1.0) { discard; }
-  let core = smoothstep(1.0, 0.0, r);
-  let glow = smoothstep(1.0, 0.0, r * max(0.05, 1.0 - rp.glow * 0.55));
-  let alpha = clamp(core * 0.8 + glow * rp.glow * 0.55, 0.0, 1.0);
-  return vec4<f32>(in.color * rp.color.rgb * (1.0 + rp.glow * 0.15), alpha);
+  // Simple sharp circle, no glow or blur
+  return vec4<f32>(in.color, 1.0);
 }
 `;
 }
