@@ -68,5 +68,25 @@ export const works = [
       date: "2026-05-11",
       description: "Chromatic woven strands pulse with the current time phases."
     }
+  },
+  {
+    slug: "social-field",
+    title: "Social Field",
+    order: 8,
+    script: "./works/social-field.js",
+    meta: {
+      date: "2026-05-13",
+      description: "Autonomous agents with personal space and relationship memory form an emergent social field."
+    }
+  },
+  {
+    slug: "social-field-gpu",
+    title: "Social Field GPU",
+    order: 9,
+    script: "./works/social-field-gpu.js",
+    meta: {
+      date: "2026-05-13",
+      description: "WebGPU compute social field with scalable multi-agent dynamics and runtime tuning."
+    }
   }
 ];

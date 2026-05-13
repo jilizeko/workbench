@@ -30,4 +30,10 @@
   <url>
     <loc>https://example.com/works/prism-weave.html</loc>
   </url>
+  <url>
+    <loc>https://example.com/works/social-field.html</loc>
+  </url>
+  <url>
+    <loc>https://example.com/works/social-field-gpu.html</loc>
+  </url>
 </urlset>
