@@ -198,6 +198,7 @@ function createAgent(x, y) {
   const fv = CONFIG.FRIENDLINESS_VARIANCE;
   const bv = CONFIG.BOUNDARY_VARIANCE;
   const aspectA = Math.random();
+  const aspectD = Math.random();
   return {
     id: nextId++,
     x, y,
@@ -206,11 +207,11 @@ function createAgent(x, y) {
     friendliness: Math.max(0, CONFIG.DEFAULT_FRIENDLINESS + (Math.random() - 0.5) * 2 * fv),
     baseBoundary: Math.max(5, CONFIG.DEFAULT_BASE_BOUNDARY + (Math.random() - 0.5) * 2 * bv),
     boundaryAmplitude: Math.max(0, CONFIG.DEFAULT_BOUNDARY_AMPLITUDE),
-    scale: aspectA,
+    scale: aspectD,
     aspectA,
     aspectB: Math.random(),
     aspectC: Math.random(),
-    aspectD: Math.random(),
+    aspectD,
   };
 }
 
@@ -1437,9 +1438,10 @@ async function initGpu() {
     traits[i * 12 + 4] = aspectA;
     traits[i * 12 + 5] = Math.random();
     traits[i * 12 + 6] = Math.random();
-    traits[i * 12 + 7] = Math.random();
+    const aspectD = Math.random();
+    traits[i * 12 + 7] = aspectD;
 
-    traits[i * 12 + 8] = aspectA;
+    traits[i * 12 + 8] = aspectD;  // visual.x = size based on aspect D
     traits[i * 12 + 9] = 0;
     traits[i * 12 + 10] = 0;
     traits[i * 12 + 11] = 0;
