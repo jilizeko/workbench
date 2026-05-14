@@ -2,6 +2,7 @@ import {
   DEFAULT_SOCIAL_FIELD_CONFIG,
   loadSocialFieldConfig,
   saveSocialFieldConfig,
+  migrateRenamedKeys,
 } from "./social-field.config.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,24 +61,36 @@ const REL_TABLE_MAX_SIZE = 1 << 21;
 const RELATION_VALUE_SCALE = 1024;
 const MAX_GPU_CONNECTION_PAIRS = 120000;
 
+
 // Unified config
 const CONFIG = loadSocialFieldConfig();
 
 const CONTROL_HINTS = {
-  ASPECT_FORCE_SCALE: "Global multiplier for all aspect-based social forces.",
+  // Force components — toggle to A/B test each in isolation.
+  ENABLE_HARD_CORE: "Monotone repulsion when agents penetrate each other (d < target). Turn OFF to allow stacking.",
+  ENABLE_SPRING_PULL: "Restoring spring when agents are slightly apart (d > target, near zone). Turn OFF to remove return-to-target.",
+  ENABLE_SOCIAL_FORCE: "Aspect-driven long-range attraction/repulsion. Turn OFF to remove all social attraction beyond contact.",
+  ENABLE_JITTER: "Small per-agent random noise. Turn OFF for deterministic motion.",
+  // Geometry
+  TARGET_SPACING: "Desired center-to-center distance as a multiple of summed radii. 1.0 = edges touch, 1.2 = 20% gap.",
+  SPACING_SOFTNESS: "Fraction by which the social signal shifts target spacing. 0.05 = friendly pairs sit 5% closer, hostile 5% farther.",
+  // Magnitudes
+  FORCE_STRENGTH: "Master multiplier for all pair forces (hard core, spring pull, social).",
+  SPRING_STRENGTH: "Stiffness of the bilateral spring around target spacing. Higher = pairs lock onto target faster.",
+  SOCIAL_INFLUENCE: "How strongly aggregated aspect similarity/conflict modulates the social signal (clamped to ±1).",
+  // Aspect channels
   ASPECT_REPEL_THRESHOLD: "Legacy shared threshold. Prefer per-aspect A/B/C/D thresholds below.",
   ASPECT_A_THRESHOLD: "Dead zone for aspect A signed similarity (higher = fewer interactions).",
   ASPECT_B_THRESHOLD: "Dead zone for aspect B signed similarity (higher = fewer interactions).",
   ASPECT_C_THRESHOLD: "Dead zone for aspect C signed similarity (higher = fewer interactions).",
   ASPECT_D_THRESHOLD: "Dead zone for aspect D signed similarity (higher = fewer interactions).",
-  ASPECT_A_STRENGTH: "Weight of aspect A in the signed pair force.",
-  ASPECT_B_STRENGTH: "Weight of aspect B in the pairwise force.",
-  ASPECT_C_STRENGTH: "Weight of aspect C in the pairwise force.",
-  ASPECT_D_STRENGTH: "Weight of aspect D in the pairwise force.",
+  ASPECT_A_STRENGTH: "Weight of aspect A in the social signal.",
+  ASPECT_B_STRENGTH: "Weight of aspect B in the social signal.",
+  ASPECT_C_STRENGTH: "Weight of aspect C in the social signal.",
+  ASPECT_D_STRENGTH: "Weight of aspect D in the social signal.",
+  // Render
   AGENT_RADIUS_MIN: "Minimum agent radius (pixels). Supports fractional values < 1.",
   AGENT_RADIUS_MAX: "Maximum agent radius (pixels). Aspect D interpolates between min and max.",
-  HARD_REPULSION: "Target spacing multiplier from summed radii: 1.0 = touching, 1.1 = ~10% gap.",
-  SOFT_REPULSION_SCALE: "Soft penetration band as a fraction of summed radii: 0.05 = ~5%.",
   CONNECTION_MIN_RELATION_NORM: "Show only links above this normalized relationship threshold (0..1).",
 };
 
@@ -91,7 +104,10 @@ const INTEGER_CONFIG_KEYS = new Set([
   "INITIAL_AGENT_COUNT", "VISION_RADIUS", "MAX_RELATIONSHIP",
   "GLOW_INTENSITY", "DECAY_BATCH_INTERVAL", "AGENTS_TO_ADD_PER_CLICK",
 ]);
-const BOOL_CONFIG_KEYS = new Set(["SHOW_CONNECTIONS", "SHOW_VISION", "ENABLE_SHADOWS", "ENABLE_ASPECTS"]);
+const BOOL_CONFIG_KEYS = new Set([
+  "SHOW_CONNECTIONS", "SHOW_VISION", "ENABLE_SHADOWS", "ENABLE_ASPECTS",
+  "ENABLE_HARD_CORE", "ENABLE_SPRING_PULL", "ENABLE_SOCIAL_FORCE", "ENABLE_JITTER",
+]);
 
 const CONFIG_RANGES = {
   INITIAL_AGENT_COUNT:      { min: 1,   max: 120,  step: 1     },
@@ -106,10 +122,11 @@ const CONFIG_RANGES = {
   MAX_RELATIONSHIP:         { min: 10,  max: 1000, step: 1     },
   RELATIONSHIP_TICK_RATE:   { min: 0,   max: 30,   step: 0.1   },
   RELATIONSHIP_DECAY:       { min: 0,   max: 10,   step: 0.01  },
-  HARD_REPULSION:           { min: 0,   max: 3,    step: 0.01  },
-  SOFT_REPULSION_SCALE:     { min: 0,   max: 1,    step: 0.01  },
-  ATTRACTION_SCALE:         { min: 0,   max: 5,    step: 0.01  },
-  ASPECT_FORCE_SCALE:       { min: 0,   max: 8,    step: 0.01  },
+  TARGET_SPACING:           { min: 0,   max: 3,    step: 0.01  },
+  SPACING_SOFTNESS:         { min: 0,   max: 1,    step: 0.01  },
+  FORCE_STRENGTH:           { min: 0,   max: 5,    step: 0.01  },
+  SPRING_STRENGTH:          { min: 0,   max: 30,   step: 0.1   },
+  SOCIAL_INFLUENCE:         { min: 0,   max: 8,    step: 0.01  },
   ASPECT_REPEL_THRESHOLD:   { min: 0.05,max: 0.95, step: 0.01  },
   ASPECT_A_THRESHOLD:       { min: 0.00,max: 0.95, step: 0.01  },
   ASPECT_B_THRESHOLD:       { min: 0.00,max: 0.95, step: 0.01  },
@@ -156,13 +173,16 @@ const PANEL_GROUPS = [
     ],
   },
   {
+    title: "force toggles",
+    boolKeys: ["ENABLE_HARD_CORE", "ENABLE_SPRING_PULL", "ENABLE_SOCIAL_FORCE", "ENABLE_JITTER"],
+  },
+  {
     title: "forces",
-    keys: ["ATTRACTION_SCALE", "SOFT_REPULSION_SCALE", "HARD_REPULSION"],
+    keys: ["TARGET_SPACING", "SPACING_SOFTNESS", "FORCE_STRENGTH", "SPRING_STRENGTH", "SOCIAL_INFLUENCE"],
   },
   {
     title: "aspects",
     keys: [
-      "ASPECT_FORCE_SCALE",
       "ASPECT_A_THRESHOLD",
       "ASPECT_B_THRESHOLD",
       "ASPECT_C_THRESHOLD",
@@ -221,8 +241,11 @@ function createAgent(x, y) {
 // ─── CPU: presets ────────────────────────────────────────────────────────────
 function sanitizeConfigSnapshot(rawConfig) {
   const clean = {};
+  if (!rawConfig) return clean;
+  // Apply key renames on a shallow copy so old presets (with HARD_REPULSION etc.) load correctly.
+  const renamed = migrateRenamedKeys({ ...rawConfig });
   for (const key of Object.keys(DEFAULT_SOCIAL_FIELD_CONFIG)) {
-    if (rawConfig && key in rawConfig) clean[key] = rawConfig[key];
+    if (key in renamed) clean[key] = renamed[key];
   }
   return clean;
 }
@@ -404,7 +427,7 @@ function simulateCpu(dt) {
       let aspectSigned = 0;
       let aspectWeight = 0;
       const aspectsActive = CONFIG.ENABLE_ASPECTS || (
-        CONFIG.ASPECT_FORCE_SCALE > 0 && (
+        CONFIG.SOCIAL_INFLUENCE > 0 && (
           CONFIG.ASPECT_A_STRENGTH > 0 ||
           CONFIG.ASPECT_B_STRENGTH > 0 ||
           CONFIG.ASPECT_C_STRENGTH > 0 ||
@@ -426,23 +449,42 @@ function simulateCpu(dt) {
       }
 
       const aspectNorm = aspectWeight > 0 ? (aspectSigned / aspectWeight) : 0;
-      const baseScalar = Math.max(-1, Math.min(1, aspectNorm * CONFIG.ASPECT_FORCE_SCALE));
+      const baseScalar = Math.max(-1, Math.min(1, aspectNorm * CONFIG.SOCIAL_INFLUENCE));
 
-      // Signed proximity gate applied AFTER social force aggregation:
-      // dist = centerDistance - hardDistance
-      // k = dist / softDistance (without abs), clamped to [-1, 1]
-      // far: k=1, boundary: k=0, inside: k<0 (force sign flips to repulsive)
+      // Pair force decomposed into three independently-toggleable components:
+      //   - HARD_CORE: monotone repulsion when d < equilibrium (prevents overlap).
+      //   - SPRING_PULL: gaussian-decaying restoring force when d >= equilibrium (returns to target).
+      //   - SOCIAL_FORCE: aspect-driven long-range attraction/repulsion (active outside spring envelope).
       const pairRadii = Math.max(0.0001, aRadius + bRadius);
-      const hardDistance = pairRadii * CONFIG.HARD_REPULSION;
-      const signedDist = d - hardDistance;
-      const softDistance = pairRadii * CONFIG.SOFT_REPULSION_SCALE;
-      const proximityK = softDistance <= 0.0001
-        ? (signedDist >= 0 ? 1 : -1)
-        : Math.max(-1, Math.min(1, signedDist / softDistance));
+      const targetDist = pairRadii * CONFIG.TARGET_SPACING;
+      const relAmplification = baseScalar > 0 ? relMultiplier : 1;
+      const socialSignal = Math.max(-1, Math.min(1, baseScalar * relAmplification));
+      const equilibrium = targetDist * (1 - socialSignal * CONFIG.SPACING_SOFTNESS);
 
-      const pairScalar = baseScalar * proximityK;
-      const distanceFalloff = 0.25 + 0.75 * Math.max(0, 1 - d / Math.max(1, vr));
-      let force = pairScalar * relMultiplier * CONFIG.ATTRACTION_SCALE * distanceFalloff;
+      const u = (d - equilibrium) / Math.max(0.0001, targetDist);
+
+      let springForce = 0;
+      let envelope = 1;
+      if (u < 0) {
+        // Inside equilibrium: hard-core repulsion. Linear in u, magnitude largest at d=0.
+        if (CONFIG.ENABLE_HARD_CORE) {
+          springForce = u * CONFIG.FORCE_STRENGTH * CONFIG.SPRING_STRENGTH;
+        }
+      } else {
+        envelope = Math.exp(-u * u);
+        // Outside equilibrium: spring pull-back toward target distance.
+        if (CONFIG.ENABLE_SPRING_PULL) {
+          springForce = u * CONFIG.FORCE_STRENGTH * CONFIG.SPRING_STRENGTH * envelope;
+        }
+      }
+
+      let aspectForce = 0;
+      if (CONFIG.ENABLE_SOCIAL_FORCE) {
+        const rangeGate = Math.max(0, 1 - d / Math.max(1, vr));
+        aspectForce = socialSignal * CONFIG.FORCE_STRENGTH * rangeGate * (1 - envelope);
+      }
+
+      const force = springForce + aspectForce;
 
       accX[i] += force * nx;
       accY[i] += force * ny;
@@ -754,6 +796,12 @@ struct SimParams {
    relationProbeCount : u32,
    decayStart : u32,
    decayCount : u32,
+
+   springStrength : f32,
+   enableHardCore : u32,
+   enableSpringPull : u32,
+   enableSocialForce : u32,
+   enableJitter : u32,
 }
 
 @group(0) @binding(0) var<storage, read> srcAgents : array<AgentState>;
@@ -983,20 +1031,38 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
           pairForce = clamp(aspectNorm * params.aspectForceScale, -1.0, 1.0);
         }
 
-        var proximityK = 1.0;
+        // Pair force decomposed into three independently-toggleable components:
+        //   - HARD_CORE: monotone repulsion when d < equilibrium.
+        //   - SPRING_PULL: gaussian restoring force when d >= equilibrium.
+        //   - SOCIAL_FORCE: aspect-driven long-range force outside the spring envelope.
         let pairRadii = max(0.0001, selfRenderRadius + otherRenderRadius);
-        let hardDistance = pairRadii * params.hardRepulsion;
-        let signedDist = dist - hardDistance;
-        let softDistance = pairRadii * params.softRepulsion;
-        if (softDistance <= 0.0001) {
-          proximityK = select(-1.0, 1.0, signedDist >= 0.0);
+        let targetDist = pairRadii * params.hardRepulsion;
+        let relAmplification = select(1.0, relMultiplier, pairForce > 0.0);
+        let socialSignal = clamp(pairForce * relAmplification, -1.0, 1.0);
+        let equilibrium = targetDist * (1.0 - socialSignal * params.softRepulsion);
+
+        let u = (dist - equilibrium) / max(0.0001, targetDist);
+
+        var springForce : f32 = 0.0;
+        var envelope : f32 = 1.0;
+        if (u < 0.0) {
+          if (params.enableHardCore != 0u) {
+            springForce = u * params.attraction * params.springStrength;
+          }
         } else {
-          proximityK = clamp(signedDist / softDistance, -1.0, 1.0);
+          envelope = exp(-u * u);
+          if (params.enableSpringPull != 0u) {
+            springForce = u * params.attraction * params.springStrength * envelope;
+          }
         }
 
-        let pairScalar = pairForce * proximityK;
-        let distGain = 0.25 + 0.75 * distFalloff;
-        pairForce = pairScalar * relMultiplier * params.attraction * distGain;
+        var aspectForce : f32 = 0.0;
+        if (params.enableSocialForce != 0u) {
+          let rangeGate = max(0.0, 1.0 - dist / max(0.0001, radius));
+          aspectForce = socialSignal * params.attraction * rangeGate * (1.0 - envelope);
+        }
+
+        pairForce = springForce + aspectForce;
 
         force += dir * pairForce;
 
@@ -1005,9 +1071,11 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
     }
   }
 
-  let n0 = f32(hash32(i * 92821u + params.count) & 1023u) / 1023.0;
-  let n1 = f32(hash32(i * 13331u + params.gridX) & 1023u) / 1023.0;
-  force += vec2<f32>(n0 - 0.5, n1 - 0.5) * params.globalJitter * selfTraits.params.w;
+  if (params.enableJitter != 0u) {
+    let n0 = f32(hash32(i * 92821u + params.count) & 1023u) / 1023.0;
+    let n1 = f32(hash32(i * 13331u + params.gridX) & 1023u) / 1023.0;
+    force += vec2<f32>(n0 - 0.5, n1 - 0.5) * params.globalJitter * selfTraits.params.w;
+  }
 
   var vel = (selfState.vel + force * params.dt) * params.damping;
   let speed = length(vel);
@@ -1275,10 +1343,14 @@ function writeSimUniforms(dt) {
 
   f32[4] = CONFIG.VISION_RADIUS / Math.max(1, width);
   f32[5] = radiusMinNorm;
-  f32[6] = CONFIG.ATTRACTION_SCALE;
-  f32[7] = CONFIG.SOFT_REPULSION_SCALE;
+  f32[6] = CONFIG.FORCE_STRENGTH;
+  f32[7] = CONFIG.SPACING_SOFTNESS;
 
-  f32[8] = CONFIG.SPEED_LIMIT / Math.max(1, width);
+  // SPEED_LIMIT is in pixels-per-frame (CPU semantics). GPU integrates pos += vel*dt
+  // with vel in normalized-per-second, so cap = pixels/(width·dt) to give the same
+  // per-frame ceiling. Without /dt the cap was ~60× too small and agents could not
+  // outrun the swarm's aggregate attraction → permanent clumps.
+  f32[8] = CONFIG.SPEED_LIMIT / Math.max(1, width) / Math.max(0.0001, dt);
   f32[9] = CONFIG.FRICTION;
   f32[10] = 0.001;
   f32[11] = radiusMaxNorm;
@@ -1290,14 +1362,14 @@ function writeSimUniforms(dt) {
   u32[15] = grid.count;
 
   const aspectsEnabled = CONFIG.ENABLE_ASPECTS || (
-    CONFIG.ASPECT_FORCE_SCALE > 0 && (
+    CONFIG.SOCIAL_INFLUENCE > 0 && (
       CONFIG.ASPECT_A_STRENGTH > 0 ||
       CONFIG.ASPECT_B_STRENGTH > 0 ||
       CONFIG.ASPECT_C_STRENGTH > 0 ||
       CONFIG.ASPECT_D_STRENGTH > 0
     )
   );
-  f32[16] = aspectsEnabled ? CONFIG.ASPECT_FORCE_SCALE : 0;
+  f32[16] = aspectsEnabled ? CONFIG.SOCIAL_INFLUENCE : 0;
   f32[17] = CONFIG.ASPECT_A_THRESHOLD ?? CONFIG.ASPECT_REPEL_THRESHOLD;
   f32[18] = CONFIG.ASPECT_A_STRENGTH;
   f32[19] = CONFIG.ASPECT_B_STRENGTH;
@@ -1306,8 +1378,8 @@ function writeSimUniforms(dt) {
   f32[22] = CONFIG.ASPECT_D_THRESHOLD ?? CONFIG.ASPECT_REPEL_THRESHOLD;
   f32[23] = CONFIG.ASPECT_C_STRENGTH;
   f32[24] = CONFIG.ASPECT_D_STRENGTH;
-  f32[25] = CONFIG.HARD_REPULSION;
-  f32[26] = CONFIG.SOFT_REPULSION_SCALE;
+  f32[25] = CONFIG.TARGET_SPACING;
+  f32[26] = CONFIG.SPACING_SOFTNESS;
 
   f32[27] = CONFIG.RELATIONSHIP_TICK_RATE;
   f32[28] = decayAmount;
@@ -1320,6 +1392,12 @@ function writeSimUniforms(dt) {
   u32[34] = computeRelationProbeCount(count);
   u32[35] = gpuDecayStart >>> 0;
   u32[36] = gpuDecayCount >>> 0;
+
+  f32[37] = Math.max(0, Number(CONFIG.SPRING_STRENGTH) || 0);
+  u32[38] = CONFIG.ENABLE_HARD_CORE ? 1 : 0;
+  u32[39] = CONFIG.ENABLE_SPRING_PULL ? 1 : 0;
+  u32[40] = CONFIG.ENABLE_SOCIAL_FORCE ? 1 : 0;
+  u32[41] = CONFIG.ENABLE_JITTER ? 1 : 0;
 
   device.queue.writeBuffer(simUniformBuffer, 0, data);
 }
@@ -2095,7 +2173,7 @@ function buildPanel() {
   for (const groupDef of PANEL_GROUPS) {
     const group = document.createElement("details");
     group.className = "group";
-    group.open = groupDef.title === "world" || groupDef.title === "agent";
+    group.open = groupDef.title === "force toggles" || groupDef.title === "forces" || groupDef.title === "world";
     group.innerHTML = `<summary>${groupDef.title}</summary>`;
 
     if (groupDef.keys) {

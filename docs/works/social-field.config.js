@@ -22,22 +22,33 @@ export const DEFAULT_SOCIAL_FIELD_CONFIG = {
   RELATIONSHIP_TICK_RATE: 4,  // points per second when in vision
   RELATIONSHIP_DECAY: 0.3,    // points per second when out of vision (0 = no decay)
 
-  // Force parameters
-  HARD_REPULSION: 1,          // spacing multiplier from summed radii: 1.0 = touching
-  SOFT_REPULSION_SCALE: 0.05, // soft penetration band as fraction of summed radii
-  ATTRACTION_SCALE: 1.2,      // global attraction multiplier
-  ASPECT_FORCE_SCALE: 2.8,    // additional force from aspect similarity/conflict
-  ASPECT_REPEL_THRESHOLD: 0.5, // if aspect diff is above this, it repels
-  ASPECT_A_THRESHOLD: 0.25,   // dead zone for aspect A signed similarity
-  ASPECT_B_THRESHOLD: 0.25,   // dead zone for aspect B signed similarity
-  ASPECT_C_THRESHOLD: 0.25,   // dead zone for aspect C signed similarity
-  ASPECT_D_THRESHOLD: 0.25,   // dead zone for aspect D signed similarity
-  ASPECT_A_STRENGTH: 1.0,     // influence of aspect A on interactions
-  ASPECT_B_STRENGTH: 1.0,     // influence of aspect B on interactions
-  ASPECT_C_STRENGTH: 1.0,     // influence of aspect C on interactions
-  ASPECT_D_STRENGTH: 1.0,     // influence of aspect D on interactions
+  // Pair-force toggles (independent components — flip individually to A/B test)
+  ENABLE_HARD_CORE: true,      // monotone repulsion when d < equilibrium (prevents overlap)
+  ENABLE_SPRING_PULL: true,    // restoring force when d > equilibrium (returns to target)
+  ENABLE_SOCIAL_FORCE: true,   // aspect-driven long-range attraction/repulsion
+  ENABLE_JITTER: true,         // small per-agent random noise
+
+  // Pair-spacing geometry
+  TARGET_SPACING: 1,           // (was HARD_REPULSION) center-to-center as multiple of summed radii. 1.0 = touching, 1.2 = 20% gap.
+  SPACING_SOFTNESS: 0.05,      // (was SOFT_REPULSION_SCALE) ±fraction by which social signal shifts target. 0.05 = ±5%.
+
+  // Pair-force magnitudes
+  FORCE_STRENGTH: 1.2,         // (was ATTRACTION_SCALE) master multiplier on all pair forces
+  SPRING_STRENGTH: 8,          // (was hardcoded SPRING_STIFFNESS) stiffness of the bilateral spring
+  SOCIAL_INFLUENCE: 2.8,       // (was ASPECT_FORCE_SCALE) how strongly aspects modulate the social signal
+
+  // Aspect channels
+  ASPECT_REPEL_THRESHOLD: 0.5, // legacy global threshold (kept for backward compat with old configs)
+  ASPECT_A_THRESHOLD: 0.25,    // dead zone for aspect A signed similarity
+  ASPECT_B_THRESHOLD: 0.25,    // dead zone for aspect B signed similarity
+  ASPECT_C_THRESHOLD: 0.25,    // dead zone for aspect C signed similarity
+  ASPECT_D_THRESHOLD: 0.25,    // dead zone for aspect D signed similarity
+  ASPECT_A_STRENGTH: 1.0,      // weight of aspect A in the social signal
+  ASPECT_B_STRENGTH: 1.0,      // weight of aspect B in the social signal
+  ASPECT_C_STRENGTH: 1.0,      // weight of aspect C in the social signal
+  ASPECT_D_STRENGTH: 1.0,      // weight of aspect D in the social signal
   BOUNDARY_REDUCTION_MAX: 0.72, // max fraction of boundary that friendship can remove
-  BOUNDARY_CURVE: 1.8,        // curvature of friendship→boundary mapping
+  BOUNDARY_CURVE: 1.8,         // curvature of friendship→boundary mapping
 
   // Visuals
   AGENT_RADIUS_MIN: 0.35,
@@ -47,20 +58,42 @@ export const DEFAULT_SOCIAL_FIELD_CONFIG = {
   SHOW_VISION: false,
   CONNECTION_ALPHA_MAX: 0.55,
   CONNECTION_MIN_RELATION_NORM: 0.7,
-  
+
   // Performance tweaks
   ENABLE_SHADOWS: false,
   ENABLE_ASPECTS: true,
-  DECAY_BATCH_INTERVAL: 10,  // batch decay every N frames
+  DECAY_BATCH_INTERVAL: 10,    // batch decay every N frames
 };
 
 const LS_KEY = "social-field-config";
+
+// Old → new key renames. Applied when loading saved configs and presets.
+const RENAMES = {
+  HARD_REPULSION: "TARGET_SPACING",
+  SOFT_REPULSION_SCALE: "SPACING_SOFTNESS",
+  ATTRACTION_SCALE: "FORCE_STRENGTH",
+  ASPECT_FORCE_SCALE: "SOCIAL_INFLUENCE",
+};
+
+export function migrateRenamedKeys(cfg) {
+  if (!cfg || typeof cfg !== "object") return cfg;
+  for (const [oldKey, newKey] of Object.entries(RENAMES)) {
+    if (oldKey in cfg) {
+      if (!(newKey in cfg) && Number.isFinite(cfg[oldKey])) {
+        cfg[newKey] = cfg[oldKey];
+      }
+      delete cfg[oldKey];
+    }
+  }
+  return cfg;
+}
 
 export function loadSocialFieldConfig() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
+      migrateRenamedKeys(saved);
       const merged = { ...DEFAULT_SOCIAL_FIELD_CONFIG, ...saved };
 
       // Backward compatibility for old single-size setting.
@@ -73,21 +106,22 @@ export function loadSocialFieldConfig() {
       if (!Number.isFinite(merged.AGENT_RADIUS_MIN)) merged.AGENT_RADIUS_MIN = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MIN;
       if (!Number.isFinite(merged.AGENT_RADIUS_MAX)) merged.AGENT_RADIUS_MAX = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MAX;
 
-      // Legacy migration:
-      // old HARD_REPULSION was tuned around 4.0 (effective ~1.0), map to new multiplier space.
-      if (Number.isFinite(merged.HARD_REPULSION) && merged.HARD_REPULSION > 3) {
-        merged.HARD_REPULSION = merged.HARD_REPULSION / 4;
+      // Legacy magnitude migration (TARGET_SPACING used to be tuned ~4, SPACING_SOFTNESS in pixels):
+      if (Number.isFinite(merged.TARGET_SPACING) && merged.TARGET_SPACING > 3) {
+        merged.TARGET_SPACING = merged.TARGET_SPACING / 4;
       }
-      // old SOFT_REPULSION_SCALE lived in large absolute values; map to relative [0..1] band.
-      if (Number.isFinite(merged.SOFT_REPULSION_SCALE) && merged.SOFT_REPULSION_SCALE > 1) {
-        merged.SOFT_REPULSION_SCALE = merged.SOFT_REPULSION_SCALE / 100;
+      if (Number.isFinite(merged.SPACING_SOFTNESS) && merged.SPACING_SOFTNESS > 1) {
+        merged.SPACING_SOFTNESS = merged.SPACING_SOFTNESS / 100;
       }
 
-      if (!Number.isFinite(merged.HARD_REPULSION) || merged.HARD_REPULSION < 0) {
-        merged.HARD_REPULSION = DEFAULT_SOCIAL_FIELD_CONFIG.HARD_REPULSION;
+      if (!Number.isFinite(merged.TARGET_SPACING) || merged.TARGET_SPACING < 0) {
+        merged.TARGET_SPACING = DEFAULT_SOCIAL_FIELD_CONFIG.TARGET_SPACING;
       }
-      if (!Number.isFinite(merged.SOFT_REPULSION_SCALE) || merged.SOFT_REPULSION_SCALE < 0) {
-        merged.SOFT_REPULSION_SCALE = DEFAULT_SOCIAL_FIELD_CONFIG.SOFT_REPULSION_SCALE;
+      if (!Number.isFinite(merged.SPACING_SOFTNESS) || merged.SPACING_SOFTNESS < 0) {
+        merged.SPACING_SOFTNESS = DEFAULT_SOCIAL_FIELD_CONFIG.SPACING_SOFTNESS;
+      }
+      if (!Number.isFinite(merged.SPRING_STRENGTH) || merged.SPRING_STRENGTH < 0) {
+        merged.SPRING_STRENGTH = DEFAULT_SOCIAL_FIELD_CONFIG.SPRING_STRENGTH;
       }
 
       if (merged.AGENT_RADIUS_MAX < merged.AGENT_RADIUS_MIN) {
