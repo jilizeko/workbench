@@ -389,8 +389,11 @@ function simulateCpu(dt) {
       const reduction = Math.pow(relNorm, CONFIG.BOUNDARY_CURVE) * CONFIG.BOUNDARY_REDUCTION_MAX;
       const hardScale = Math.max(0.05, CONFIG.HARD_REPULSION / 4);
       const softScale = Math.max(0.05, CONFIG.SOFT_REPULSION_SCALE / 5);
-      const hardDistance = Math.max(1, a.baseBoundary * (1 - reduction) * hardScale);
-      const softDistance = Math.max(0.0001, a.boundaryAmplitude * softScale);
+      const aRadius = getAgentRadiusFromAspectPx(a.aspectD);
+      const bRadius = getAgentRadiusFromAspectPx(b.aspectD);
+      const hardDistance = Math.max(0.05, (aRadius + bRadius) * (1 - reduction) * hardScale);
+      // softDistance now also scales with agent size, for consistency
+      const softDistance = Math.max(0.0001, (aRadius + bRadius) * softScale);
 
       // Signed channel contribution: +1 means matching aspect, -1 means opposite.
       // Threshold creates a dead zone around 0 to suppress weak signals.
@@ -533,10 +536,9 @@ function drawCpu() {
     }
   }
 
-  const rMin = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MIN) || 0.35);
-  const rMaxRaw = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MAX) || 7);
-  const rLo = Math.min(rMin, rMaxRaw);
-  const rHi = Math.max(rMin, rMaxRaw);
+  const radiusRange = getAgentRadiusRangePx();
+  const rLo = radiusRange.min;
+  const rHi = radiusRange.max;
   for (const a of agents) {
     const tSize = Math.min(1, Math.max(0, Number(a.aspectD) || 0));
     const r = rLo + (rHi - rLo) * tSize;
@@ -657,6 +659,18 @@ function getConfiguredAgentCount() {
   const clamped = Math.max(1, Math.min(200000, Math.floor(raw)));
   CONFIG.INITIAL_AGENT_COUNT = clamped;
   return clamped;
+}
+
+function getAgentRadiusRangePx() {
+  const rMin = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MIN) || 0.35);
+  const rMaxRaw = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MAX) || 7);
+  return { min: Math.min(rMin, rMaxRaw), max: Math.max(rMin, rMaxRaw) };
+}
+
+function getAgentRadiusFromAspectPx(aspectD) {
+  const range = getAgentRadiusRangePx();
+  const t = Math.min(1, Math.max(0, Number(aspectD) || 0));
+  return range.min + (range.max - range.min) * t;
 }
 
 function nextPowerOfTwo(v) {
@@ -935,6 +949,7 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
           }
         }
 
+        let otherTraits = traits[j];
         let dir = delta / dist;
         let rel = min(params.maxRelationship, readRelationship(relSlot));
         let relNorm = clamp(rel / max(0.0001, params.maxRelationship), 0.0, 1.0);
@@ -943,15 +958,17 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
         let reduction = pow(relNorm, max(0.0001, params.boundaryCurve)) * params.boundaryReductionMax;
         let hardScale = max(0.05, params.hardRepulsion / 4.0);
         let softScale = max(0.05, params.softRepulsion / 5.0);
-        let hardDistance = max(0.001, selfTraits.params.y * (1.0 - reduction) * hardScale);
-        let softDistance = max(0.0001, selfTraits.params.z * softScale);
+        let selfRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(selfTraits.visual.x, 0.0, 1.0);
+        let otherRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(otherTraits.visual.x, 0.0, 1.0);
+        let hardDistance = max(0.001, (selfRenderRadius + otherRenderRadius) * (1.0 - reduction) * hardScale);
+        // softDistance now also scales with agent size, for consistency
+        let softDistance = max(0.0001, (selfRenderRadius + otherRenderRadius) * softScale);
         let distFalloff = max(0.0, 1.0 - dist / radius);
 
         var pairForce = 0.0;
         let aspectsActive = params.aspectForceScale > 0.0 && (params.aspectAStrength + params.aspectBStrength + params.aspectCStrength + params.aspectDStrength) > 0.0;
 
         if (aspectsActive) {
-          let otherTraits = traits[j];
           let dA = abs(selfTraits.aspects.x - otherTraits.aspects.x);
           let dB = abs(selfTraits.aspects.y - otherTraits.aspects.y);
           let dC = abs(selfTraits.aspects.z - otherTraits.aspects.z);
@@ -1216,6 +1233,9 @@ fn fsMain(in : VsOut) -> @location(0) vec4<f32> {
 function writeSimUniforms(dt) {
   const grid = computeGridSize();
   const count = Math.max(1, gpuAgentCount || getConfiguredAgentCount());
+  const radiusRange = getAgentRadiusRangePx();
+  const radiusMinNorm = radiusRange.min / Math.max(1, width);
+  const radiusMaxNorm = radiusRange.max / Math.max(1, width);
   const data = new ArrayBuffer(192);
   const f32 = new Float32Array(data);
   const u32 = new Uint32Array(data);
@@ -1249,14 +1269,14 @@ function writeSimUniforms(dt) {
   u32[3] = grid.gy;
 
   f32[4] = CONFIG.VISION_RADIUS / Math.max(1, width);
-  f32[5] = CONFIG.DEFAULT_BASE_BOUNDARY / Math.max(1, width);
+  f32[5] = radiusMinNorm;
   f32[6] = CONFIG.ATTRACTION_SCALE;
   f32[7] = CONFIG.SOFT_REPULSION_SCALE;
 
   f32[8] = CONFIG.SPEED_LIMIT / Math.max(1, width);
   f32[9] = CONFIG.FRICTION;
   f32[10] = 0.001;
-  f32[11] = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MAX) || 7);
+  f32[11] = radiusMaxNorm;
 
   u32[12] = 4;
   u32[13] = GRID_MAX_CELL_CAPACITY;
