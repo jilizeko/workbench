@@ -74,8 +74,8 @@ const CONTROL_HINTS = {
   ASPECT_B_STRENGTH: "Weight of aspect B in the pairwise force.",
   ASPECT_C_STRENGTH: "Weight of aspect C in the pairwise force.",
   ASPECT_D_STRENGTH: "Weight of aspect D in the pairwise force.",
-  GLOW_INTENSITY: "Visible halo strength around agents.",
-  AGENT_RADIUS: "Base radius; actual size is base radius × agent scale.",
+  AGENT_RADIUS_MIN: "Minimum agent radius (pixels). Supports fractional values < 1.",
+  AGENT_RADIUS_MAX: "Maximum agent radius (pixels). Aspect D interpolates between min and max.",
   CONNECTION_MIN_RELATION_NORM: "Show only links above this normalized relationship threshold (0..1).",
 };
 
@@ -87,7 +87,7 @@ const PRESET_SCHEMA_VERSION = 2;
 
 const INTEGER_CONFIG_KEYS = new Set([
   "INITIAL_AGENT_COUNT", "VISION_RADIUS", "MAX_RELATIONSHIP",
-  "AGENT_RADIUS", "GLOW_INTENSITY", "DECAY_BATCH_INTERVAL", "AGENTS_TO_ADD_PER_CLICK",
+  "GLOW_INTENSITY", "DECAY_BATCH_INTERVAL", "AGENTS_TO_ADD_PER_CLICK",
 ]);
 const BOOL_CONFIG_KEYS = new Set(["SHOW_CONNECTIONS", "SHOW_VISION", "ENABLE_SHADOWS", "ENABLE_ASPECTS"]);
 
@@ -119,7 +119,8 @@ const CONFIG_RANGES = {
   ASPECT_D_STRENGTH:        { min: 0,   max: 3,    step: 0.01  },
   BOUNDARY_REDUCTION_MAX:   { min: 0,   max: 1,    step: 0.01  },
   BOUNDARY_CURVE:           { min: 0.1, max: 6,    step: 0.1   },
-  AGENT_RADIUS:             { min: 2,   max: 40,   step: 1     },
+  AGENT_RADIUS_MIN:         { min: 0.05,max: 40,   step: 0.01  },
+  AGENT_RADIUS_MAX:         { min: 0.05,max: 40,   step: 0.01  },
   GLOW_INTENSITY:           { min: 0,   max: 60,   step: 1     },
   CONNECTION_ALPHA_MAX:     { min: 0,   max: 1,    step: 0.01  },
   CONNECTION_MIN_RELATION_NORM: { min: 0, max: 1, step: 0.01 },
@@ -172,7 +173,7 @@ const PANEL_GROUPS = [
   },
   {
     title: "render",
-    keys: ["AGENT_RADIUS", "GLOW_INTENSITY", "CONNECTION_ALPHA_MAX", "CONNECTION_MIN_RELATION_NORM"],
+    keys: ["AGENT_RADIUS_MIN", "AGENT_RADIUS_MAX", "CONNECTION_ALPHA_MAX", "CONNECTION_MIN_RELATION_NORM"],
   },
   {
     title: "toggles",
@@ -532,9 +533,13 @@ function drawCpu() {
     }
   }
 
-  const glowOn = CONFIG.GLOW_INTENSITY > 0;
+  const rMin = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MIN) || 0.35);
+  const rMaxRaw = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MAX) || 7);
+  const rLo = Math.min(rMin, rMaxRaw);
+  const rHi = Math.max(rMin, rMaxRaw);
   for (const a of agents) {
-    const r = Math.max(0.05, CONFIG.AGENT_RADIUS * a.scale);
+    const tSize = Math.min(1, Math.max(0, Number(a.aspectD) || 0));
+    const r = rLo + (rHi - rLo) * tSize;
     const maxF  = Math.max(0.001, CONFIG.DEFAULT_FRIENDLINESS * 2);
     const fNorm = Math.min(1, a.friendliness / maxF);
     const baseLightness = 40 + fNorm * 35;
@@ -544,19 +549,11 @@ function drawCpu() {
     const hue = a.aspectA * 360;
     const color = `hsl(${hue.toFixed(1)},75%,${lightness.toFixed(1)}%)`;
 
-    if (CONFIG.ENABLE_SHADOWS && glowOn) {
-      const glowBlur = CONFIG.GLOW_INTENSITY * (0.2 + 1.8 * a.aspectD);
-      ctx.shadowBlur  = glowBlur;
-      ctx.shadowColor = color;
-    }
-
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
     ctx.fill();
   }
-
-  if (glowOn) { ctx.shadowBlur = 0; ctx.shadowColor = "transparent"; }
 }
 
 function replaceCanvasNode() {
@@ -1019,8 +1016,8 @@ struct AgentTraits {
 }
 
 struct RenderParams {
-  pointSize : f32,
-  glow : f32,
+  pointSizeMin : f32,
+  pointSizeMax : f32,
   invWidth : f32,
   invHeight : f32,
   color : vec4<f32>,
@@ -1050,9 +1047,10 @@ fn vsMain(@builtin(vertex_index) vertexIndex : u32, @builtin(instance_index) ins
   let state = agents[instanceIndex];
   let tr = traits[instanceIndex];
   let center = vec2<f32>(state.pos.x * 2.0 - 1.0, 1.0 - state.pos.y * 2.0);
-  let scale = max(0.05, tr.visual.x);
-  let px = rp.pointSize * scale * 2.0 * rp.invWidth;
-  let py = rp.pointSize * scale * 2.0 * rp.invHeight;
+  let tSize = clamp(tr.visual.x, 0.0, 1.0);
+  let radius = rp.pointSizeMin + (rp.pointSizeMax - rp.pointSizeMin) * tSize;
+  let px = radius * 2.0 * rp.invWidth;
+  let py = radius * 2.0 * rp.invHeight;
   let offset = offsets[vertexIndex] * vec2<f32>(px, py);
 
   // Aspect A -> R, Aspect B -> G, Aspect C -> B
@@ -1258,7 +1256,7 @@ function writeSimUniforms(dt) {
   f32[8] = CONFIG.SPEED_LIMIT / Math.max(1, width);
   f32[9] = CONFIG.FRICTION;
   f32[10] = 0.001;
-  f32[11] = CONFIG.AGENT_RADIUS;
+  f32[11] = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MAX) || 7);
 
   u32[12] = 4;
   u32[13] = GRID_MAX_CELL_CAPACITY;
@@ -1305,11 +1303,13 @@ function writeRenderUniforms() {
   const w = Math.max(1, canvas.width);
   const h = Math.max(1, canvas.height);
   const color = hexToRgba("#f7f5f0");
-  const pointSize = Math.max(2, Number(CONFIG.AGENT_RADIUS) || 7);
-  const glow = Math.min(4, Math.max(0, CONFIG.GLOW_INTENSITY / 10));
+  const pointSizeMin = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MIN) || 0.35);
+  const pointSizeMaxRaw = Math.max(0.05, Number(CONFIG.AGENT_RADIUS_MAX) || 7);
+  const pointSizeLo = Math.min(pointSizeMin, pointSizeMaxRaw);
+  const pointSizeHi = Math.max(pointSizeMin, pointSizeMaxRaw);
   const data = new Float32Array([
-    pointSize * (window.devicePixelRatio || 1),
-    glow,
+    pointSizeLo * (window.devicePixelRatio || 1),
+    pointSizeHi * (window.devicePixelRatio || 1),
     1 / w,
     1 / h,
     color[0], color[1], color[2], 1

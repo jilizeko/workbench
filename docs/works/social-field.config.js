@@ -40,7 +40,8 @@ export const DEFAULT_SOCIAL_FIELD_CONFIG = {
   BOUNDARY_CURVE: 1.8,        // curvature of friendship→boundary mapping
 
   // Visuals
-  AGENT_RADIUS: 7,
+  AGENT_RADIUS_MIN: 0.35,
+  AGENT_RADIUS_MAX: 7,
   GLOW_INTENSITY: 0,
   SHOW_CONNECTIONS: false,
   SHOW_VISION: false,
@@ -60,7 +61,24 @@ export function loadSocialFieldConfig() {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      return { ...DEFAULT_SOCIAL_FIELD_CONFIG, ...saved };
+      const merged = { ...DEFAULT_SOCIAL_FIELD_CONFIG, ...saved };
+
+      // Backward compatibility for old single-size setting.
+      if ((saved && (saved.AGENT_RADIUS_MIN == null || saved.AGENT_RADIUS_MAX == null)) && Number.isFinite(saved?.AGENT_RADIUS)) {
+        const legacy = Math.max(0.05, Number(saved.AGENT_RADIUS));
+        if (saved.AGENT_RADIUS_MIN == null) merged.AGENT_RADIUS_MIN = Math.max(0.05, legacy * 0.1);
+        if (saved.AGENT_RADIUS_MAX == null) merged.AGENT_RADIUS_MAX = legacy;
+      }
+
+      if (!Number.isFinite(merged.AGENT_RADIUS_MIN)) merged.AGENT_RADIUS_MIN = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MIN;
+      if (!Number.isFinite(merged.AGENT_RADIUS_MAX)) merged.AGENT_RADIUS_MAX = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MAX;
+      if (merged.AGENT_RADIUS_MAX < merged.AGENT_RADIUS_MIN) {
+        const tmp = merged.AGENT_RADIUS_MAX;
+        merged.AGENT_RADIUS_MAX = merged.AGENT_RADIUS_MIN;
+        merged.AGENT_RADIUS_MIN = tmp;
+      }
+
+      return merged;
     }
   } catch (_) { /* ignore */ }
   return { ...DEFAULT_SOCIAL_FIELD_CONFIG };
