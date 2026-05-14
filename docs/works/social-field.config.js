@@ -23,8 +23,8 @@ export const DEFAULT_SOCIAL_FIELD_CONFIG = {
   RELATIONSHIP_DECAY: 0.3,    // points per second when out of vision (0 = no decay)
 
   // Force parameters
-  HARD_REPULSION: 4,          // force multiplier in hard-stop zone
-  SOFT_REPULSION_SCALE: 5,    // force multiplier in soft zone
+  HARD_REPULSION: 1,          // spacing multiplier from summed radii: 1.0 = touching
+  SOFT_REPULSION_SCALE: 0.05, // soft penetration band as fraction of summed radii
   ATTRACTION_SCALE: 1.2,      // global attraction multiplier
   ASPECT_FORCE_SCALE: 2.8,    // additional force from aspect similarity/conflict
   ASPECT_REPEL_THRESHOLD: 0.5, // if aspect diff is above this, it repels
@@ -72,6 +72,24 @@ export function loadSocialFieldConfig() {
 
       if (!Number.isFinite(merged.AGENT_RADIUS_MIN)) merged.AGENT_RADIUS_MIN = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MIN;
       if (!Number.isFinite(merged.AGENT_RADIUS_MAX)) merged.AGENT_RADIUS_MAX = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MAX;
+
+      // Legacy migration:
+      // old HARD_REPULSION was tuned around 4.0 (effective ~1.0), map to new multiplier space.
+      if (Number.isFinite(merged.HARD_REPULSION) && merged.HARD_REPULSION > 3) {
+        merged.HARD_REPULSION = merged.HARD_REPULSION / 4;
+      }
+      // old SOFT_REPULSION_SCALE lived in large absolute values; map to relative [0..1] band.
+      if (Number.isFinite(merged.SOFT_REPULSION_SCALE) && merged.SOFT_REPULSION_SCALE > 1) {
+        merged.SOFT_REPULSION_SCALE = merged.SOFT_REPULSION_SCALE / 100;
+      }
+
+      if (!Number.isFinite(merged.HARD_REPULSION) || merged.HARD_REPULSION < 0) {
+        merged.HARD_REPULSION = DEFAULT_SOCIAL_FIELD_CONFIG.HARD_REPULSION;
+      }
+      if (!Number.isFinite(merged.SOFT_REPULSION_SCALE) || merged.SOFT_REPULSION_SCALE < 0) {
+        merged.SOFT_REPULSION_SCALE = DEFAULT_SOCIAL_FIELD_CONFIG.SOFT_REPULSION_SCALE;
+      }
+
       if (merged.AGENT_RADIUS_MAX < merged.AGENT_RADIUS_MIN) {
         const tmp = merged.AGENT_RADIUS_MAX;
         merged.AGENT_RADIUS_MAX = merged.AGENT_RADIUS_MIN;
