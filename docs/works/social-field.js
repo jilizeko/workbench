@@ -391,9 +391,6 @@ function simulateCpu(dt) {
       const softScale = Math.max(0.05, CONFIG.SOFT_REPULSION_SCALE / 5);
       const aRadius = getAgentRadiusFromAspectPx(a.aspectD);
       const bRadius = getAgentRadiusFromAspectPx(b.aspectD);
-      const hardDistance = Math.max(0.05, (aRadius + bRadius) * (1 - reduction) * hardScale);
-      // softDistance now also scales with agent size, for consistency
-      const softDistance = Math.max(0.0001, (aRadius + bRadius) * softScale);
 
       // Signed channel contribution: +1 means matching aspect, -1 means opposite.
       // Threshold creates a dead zone around 0 to suppress weak signals.
@@ -430,12 +427,15 @@ function simulateCpu(dt) {
       }
 
       const aspectNorm = aspectWeight > 0 ? (aspectSigned / aspectWeight) : 0;
-      let distanceSigned = 0;
-      if (d < hardDistance + softDistance) {
-        distanceSigned = Math.max(-1, Math.min(1, (d - hardDistance) / softDistance));
+      // New repulsion logic: overlap = dist - (r1+r2)*hardRepulsion
+      const overlapDist = d - (aRadius + bRadius) * CONFIG.HARD_REPULSION;
+      let repulsionK = 0;
+      if (overlapDist < 0) {
+        // Agents are penetrating; calculate repulsion strength
+        repulsionK = -Math.min(1, Math.abs(overlapDist) / Math.max(0.0001, CONFIG.SOFT_REPULSION_SCALE));
       }
-
-      const pairScalar = Math.max(-1, Math.min(1, aspectNorm * CONFIG.ASPECT_FORCE_SCALE + distanceSigned));
+      
+      const pairScalar = Math.max(-1, Math.min(1, aspectNorm * CONFIG.ASPECT_FORCE_SCALE + repulsionK));
       const distanceFalloff = 0.25 + 0.75 * Math.max(0, 1 - d / Math.max(1, vr));
       let force = pairScalar * relMultiplier * CONFIG.ATTRACTION_SCALE * distanceFalloff;
 
@@ -960,9 +960,6 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
         let softScale = max(0.05, params.softRepulsion / 5.0);
         let selfRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(selfTraits.visual.x, 0.0, 1.0);
         let otherRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(otherTraits.visual.x, 0.0, 1.0);
-        let hardDistance = max(0.001, (selfRenderRadius + otherRenderRadius) * (1.0 - reduction) * hardScale);
-        // softDistance now also scales with agent size, for consistency
-        let softDistance = max(0.0001, (selfRenderRadius + otherRenderRadius) * softScale);
         let distFalloff = max(0.0, 1.0 - dist / radius);
 
         var pairForce = 0.0;
@@ -985,8 +982,11 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
         }
 
         var distanceSigned = 0.0;
-        if (dist < hardDistance + softDistance) {
-          distanceSigned = clamp((dist - hardDistance) / softDistance, -1.0, 1.0);
+        // New repulsion logic: overlap = dist - (r1+r2)*hardRepulsion
+        let overlapDist = dist - (selfRenderRadius + otherRenderRadius) * params.hardRepulsion;
+        if (overlapDist < 0.0) {
+          // Agents are penetrating; calculate repulsion strength
+          distanceSigned = -min(1.0, abs(overlapDist) / max(0.0001, params.softRepulsion));
         }
 
         let pairScalar = clamp(pairForce + distanceSigned, -1.0, 1.0);
