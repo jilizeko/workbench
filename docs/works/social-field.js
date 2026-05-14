@@ -71,6 +71,9 @@ const CONTROL_HINTS = {
   ENABLE_SPRING_PULL: "Restoring spring when agents are slightly apart (d > target, near zone). Turn OFF to remove return-to-target.",
   ENABLE_SOCIAL_FORCE: "Aspect-driven long-range attraction/repulsion. Turn OFF to remove all social attraction beyond contact.",
   ENABLE_JITTER: "Small per-agent random noise. Turn OFF for deterministic motion.",
+  ENABLE_SPATIAL_GRID: "Spatial hash grid for neighbor culling. OFF = brute-force O(N²) iteration over every agent; the whole canvas acts as one cell. Use to confirm whether grid binning is producing artifacts.",
+  ENABLE_WRAP_X: "Toroidal wrap on the X axis. OFF = agents clamp to left/right canvas edges (cannot cross).",
+  ENABLE_WRAP_Y: "Toroidal wrap on the Y axis. OFF = agents clamp to top/bottom canvas edges (cannot cross).",
   // Geometry
   TARGET_SPACING: "Desired center-to-center distance as a multiple of summed radii. 1.0 = edges touch, 1.2 = 20% gap.",
   SPACING_SOFTNESS: "Fraction by which the social signal shifts target spacing. 0.05 = friendly pairs sit 5% closer, hostile 5% farther.",
@@ -97,6 +100,7 @@ const CONTROL_HINTS = {
 // UI configuration
 const PANEL_WIDTH_KEY = "social-field-panel-width";
 const PANEL_BOUNDS_KEY = "social-field-panel-bounds";
+const PANEL_GROUPS_KEY = "social-field-panel-groups";
 const PRESETS_KEY = "social-field-presets";
 const PRESET_SCHEMA_VERSION = 2;
 
@@ -107,6 +111,7 @@ const INTEGER_CONFIG_KEYS = new Set([
 const BOOL_CONFIG_KEYS = new Set([
   "SHOW_CONNECTIONS", "SHOW_VISION", "ENABLE_SHADOWS", "ENABLE_ASPECTS",
   "ENABLE_HARD_CORE", "ENABLE_SPRING_PULL", "ENABLE_SOCIAL_FORCE", "ENABLE_JITTER",
+  "ENABLE_SPATIAL_GRID", "ENABLE_WRAP_X", "ENABLE_WRAP_Y",
 ]);
 
 const CONFIG_RANGES = {
@@ -174,7 +179,11 @@ const PANEL_GROUPS = [
   },
   {
     title: "force toggles",
-    boolKeys: ["ENABLE_HARD_CORE", "ENABLE_SPRING_PULL", "ENABLE_SOCIAL_FORCE", "ENABLE_JITTER"],
+    boolKeys: ["ENABLE_HARD_CORE", "ENABLE_SPRING_PULL", "ENABLE_SOCIAL_FORCE", "ENABLE_JITTER", "ENABLE_SPATIAL_GRID"],
+  },
+  {
+    title: "boundary",
+    boolKeys: ["ENABLE_WRAP_X", "ENABLE_WRAP_Y"],
   },
   {
     title: "forces",
@@ -802,6 +811,10 @@ struct SimParams {
    enableSpringPull : u32,
    enableSocialForce : u32,
    enableJitter : u32,
+
+   enableSpatialGrid : u32,
+   enableWrapX : u32,
+   enableWrapY : u32,
 }
 
 @group(0) @binding(0) var<storage, read> srcAgents : array<AgentState>;
@@ -829,6 +842,11 @@ fn wrapDelta(d : f32) -> f32 {
   if (d > 0.5) { return d - 1.0; }
   if (d < -0.5) { return d + 1.0; }
   return d;
+}
+
+fn wrapDeltaAxis(d : f32, wrap : bool) -> f32 {
+  if (!wrap) { return d; }
+  return wrapDelta(d);
 }
 
 fn wrapCoord(v : i32, m : i32) -> i32 {
@@ -897,6 +915,103 @@ fn readRelationship(slot : i32) -> f32 {
   return f32(raw) / max(1.0, params.relationValueScale);
 }
 
+// Pair-force kernel extracted from simulate() so both spatial-grid and
+// brute-force iteration branches can share it.
+fn processPair(
+  i : u32,
+  j : u32,
+  selfPos : vec2<f32>,
+  selfTraits : AgentTraits,
+  radius : f32,
+  force : ptr<function, vec2<f32>>,
+  seen : ptr<function, u32>,
+) {
+  if (j == i) { return; }
+
+  let other = srcAgents[j];
+  let delta = vec2<f32>(
+    wrapDeltaAxis(other.pos.x - selfPos.x, params.enableWrapX != 0u),
+    wrapDeltaAxis(other.pos.y - selfPos.y, params.enableWrapY != 0u)
+  );
+  let dist = length(delta);
+  if (dist <= 0.00001 || dist >= radius) { return; }
+
+  let pairHash = hashPair(i, j);
+  var relSlot = findRelSlot(pairHash);
+  let nearFactor = max(0.0, 1.0 - dist / radius);
+  let relationTickWeight = nearFactor * nearFactor;
+  if (relationTickWeight > 0.001 && i < j) {
+    if (relSlot < 0) {
+      relSlot = getOrCreateRelSlot(pairHash);
+    }
+    if (relSlot >= 0) {
+      let tickInc = u32(round(max(0.0, params.relationshipTickRate * params.dt * relationTickWeight) * max(1.0, params.relationValueScale)));
+      if (tickInc > 0u) {
+        let _prevRel = atomicAdd(&relValues[u32(relSlot)], tickInc);
+      }
+    }
+  }
+
+  let otherTraits = traits[j];
+  let dir = delta / dist;
+  let rel = min(params.maxRelationship, readRelationship(relSlot));
+  let relNorm = clamp(rel / max(0.0001, params.maxRelationship), 0.0, 1.0);
+  let relAttractionCurve = relNorm * relNorm;
+  let relMultiplier = 1.0 + relAttractionCurve * 2.0;
+  let selfRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(selfTraits.visual.x, 0.0, 1.0);
+  let otherRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(otherTraits.visual.x, 0.0, 1.0);
+
+  var pairForce = 0.0;
+  let aspectsActive = params.aspectForceScale > 0.0 && (params.aspectAStrength + params.aspectBStrength + params.aspectCStrength + params.aspectDStrength) > 0.0;
+
+  if (aspectsActive) {
+    let dA = abs(selfTraits.aspects.x - otherTraits.aspects.x);
+    let dB = abs(selfTraits.aspects.y - otherTraits.aspects.y);
+    let dC = abs(selfTraits.aspects.z - otherTraits.aspects.z);
+    let dD = abs(selfTraits.aspects.w - otherTraits.aspects.w);
+
+    let cA = channelForce(dA, params.aspectAThreshold) * params.aspectAStrength;
+    let cB = channelForce(dB, params.aspectBThreshold) * params.aspectBStrength;
+    let cC = channelForce(dC, params.aspectCThreshold) * params.aspectCStrength;
+    let cD = channelForce(dD, params.aspectDThreshold) * params.aspectDStrength;
+
+    let w = max(0.0001, params.aspectAStrength + params.aspectBStrength + params.aspectCStrength + params.aspectDStrength);
+    let aspectNorm = (cA + cB + cC + cD) / w;
+    pairForce = clamp(aspectNorm * params.aspectForceScale, -1.0, 1.0);
+  }
+
+  let pairRadii = max(0.0001, selfRenderRadius + otherRenderRadius);
+  let targetDist = pairRadii * params.hardRepulsion;
+  let relAmplification = select(1.0, relMultiplier, pairForce > 0.0);
+  let socialSignal = clamp(pairForce * relAmplification, -1.0, 1.0);
+  let equilibrium = targetDist * (1.0 - socialSignal * params.softRepulsion);
+
+  let u = (dist - equilibrium) / max(0.0001, targetDist);
+
+  var springForce : f32 = 0.0;
+  var envelope : f32 = 1.0;
+  if (u < 0.0) {
+    if (params.enableHardCore != 0u) {
+      springForce = u * params.attraction * params.springStrength;
+    }
+  } else {
+    envelope = exp(-u * u);
+    if (params.enableSpringPull != 0u) {
+      springForce = u * params.attraction * params.springStrength * envelope;
+    }
+  }
+
+  var aspectForce : f32 = 0.0;
+  if (params.enableSocialForce != 0u) {
+    let rangeGate = max(0.0, 1.0 - dist / max(0.0001, radius));
+    aspectForce = socialSignal * params.attraction * rangeGate * (1.0 - envelope);
+  }
+
+  let pairFinal = springForce + aspectForce;
+  *force += dir * pairFinal;
+  *seen = *seen + 1u;
+}
+
 @compute @workgroup_size(128)
 fn decayRelations(@builtin(global_invocation_id) gid : vec3<u32>) {
   if (gid.x >= params.decayCount) { return; }
@@ -958,116 +1073,45 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
 
   var seen : u32 = 0u;
 
-  for (var oy = -1; oy <= 1; oy = oy + 1) {
-    for (var ox = -1; ox <= 1; ox = ox + 1) {
-      if (seen >= params.maxNeighbors) {
-        continue;
-      }
+  if (params.enableSpatialGrid != 0u) {
+    // Center-out 3×3 cell iteration: own cell first, then 4 axial neighbors,
+    // then 4 diagonals. Eliminates the top-left scan bias of a fixed
+    // row-major order.
+    let cellOffsets = array<vec2<i32>, 9>(
+      vec2<i32>(0, 0),
+      vec2<i32>(-1, 0), vec2<i32>(1, 0), vec2<i32>(0, -1), vec2<i32>(0, 1),
+      vec2<i32>(-1, -1), vec2<i32>(1, -1), vec2<i32>(-1, 1), vec2<i32>(1, 1)
+    );
 
-      let nx = u32(wrapCoord(cx + ox, gxI));
-      let ny = u32(wrapCoord(cy + oy, gyI));
+    for (var n : u32 = 0u; n < 9u; n = n + 1u) {
+      if (seen >= params.maxNeighbors) { continue; }
+      let ox = cellOffsets[n].x;
+      let oy = cellOffsets[n].y;
+      let rawNx = cx + ox;
+      let rawNy = cy + oy;
+      // When wrap is disabled on an axis, don't pull neighbors from the
+      // opposite edge — just skip out-of-bounds cells.
+      if (params.enableWrapX == 0u && (rawNx < 0 || rawNx >= gxI)) { continue; }
+      if (params.enableWrapY == 0u && (rawNy < 0 || rawNy >= gyI)) { continue; }
+      let nx = u32(wrapCoord(rawNx, gxI));
+      let ny = u32(wrapCoord(rawNy, gyI));
       let nCell = ny * gx + nx;
       let rawCount = atomicLoad(&cellCounts[nCell]);
       let bucketCount = min(rawCount, params.maxCellCap);
 
       for (var k : u32 = 0u; k < bucketCount; k = k + 1u) {
-        if (seen >= params.maxNeighbors) {
-          break;
-        }
-
+        if (seen >= params.maxNeighbors) { break; }
         let j = cellAgents[nCell * params.maxCellCap + k];
-        if (j == i) { continue; }
-
-        let other = srcAgents[j];
-        let delta = vec2<f32>(
-          wrapDelta(other.pos.x - selfState.pos.x),
-          wrapDelta(other.pos.y - selfState.pos.y)
-        );
-        let dist = length(delta);
-        if (dist <= 0.00001 || dist >= radius) { continue; }
-
-        let pairHash = hashPair(i, j);
-        var relSlot = findRelSlot(pairHash);
-        let nearFactor = max(0.0, 1.0 - dist / radius);
-        let relationTickWeight = nearFactor * nearFactor;
-        if (relationTickWeight > 0.001 && i < j) {
-          if (relSlot < 0) {
-            relSlot = getOrCreateRelSlot(pairHash);
-          }
-          if (relSlot >= 0) {
-            let tickInc = u32(round(max(0.0, params.relationshipTickRate * params.dt * relationTickWeight) * max(1.0, params.relationValueScale)));
-            if (tickInc > 0u) {
-              let _prevRel = atomicAdd(&relValues[u32(relSlot)], tickInc);
-            }
-          }
-        }
-
-        let otherTraits = traits[j];
-        let dir = delta / dist;
-        let rel = min(params.maxRelationship, readRelationship(relSlot));
-        let relNorm = clamp(rel / max(0.0001, params.maxRelationship), 0.0, 1.0);
-        let relAttractionCurve = relNorm * relNorm;
-        let relMultiplier = 1.0 + relAttractionCurve * 2.0;
-        let selfRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(selfTraits.visual.x, 0.0, 1.0);
-        let otherRenderRadius = params.personalSpace + (params.pointSize - params.personalSpace) * clamp(otherTraits.visual.x, 0.0, 1.0);
-        let distFalloff = max(0.0, 1.0 - dist / radius);
-
-        var pairForce = 0.0;
-        let aspectsActive = params.aspectForceScale > 0.0 && (params.aspectAStrength + params.aspectBStrength + params.aspectCStrength + params.aspectDStrength) > 0.0;
-
-        if (aspectsActive) {
-          let dA = abs(selfTraits.aspects.x - otherTraits.aspects.x);
-          let dB = abs(selfTraits.aspects.y - otherTraits.aspects.y);
-          let dC = abs(selfTraits.aspects.z - otherTraits.aspects.z);
-          let dD = abs(selfTraits.aspects.w - otherTraits.aspects.w);
-
-          let cA = channelForce(dA, params.aspectAThreshold) * params.aspectAStrength;
-          let cB = channelForce(dB, params.aspectBThreshold) * params.aspectBStrength;
-          let cC = channelForce(dC, params.aspectCThreshold) * params.aspectCStrength;
-          let cD = channelForce(dD, params.aspectDThreshold) * params.aspectDStrength;
-
-          let w = max(0.0001, params.aspectAStrength + params.aspectBStrength + params.aspectCStrength + params.aspectDStrength);
-          let aspectNorm = (cA + cB + cC + cD) / w;
-          pairForce = clamp(aspectNorm * params.aspectForceScale, -1.0, 1.0);
-        }
-
-        // Pair force decomposed into three independently-toggleable components:
-        //   - HARD_CORE: monotone repulsion when d < equilibrium.
-        //   - SPRING_PULL: gaussian restoring force when d >= equilibrium.
-        //   - SOCIAL_FORCE: aspect-driven long-range force outside the spring envelope.
-        let pairRadii = max(0.0001, selfRenderRadius + otherRenderRadius);
-        let targetDist = pairRadii * params.hardRepulsion;
-        let relAmplification = select(1.0, relMultiplier, pairForce > 0.0);
-        let socialSignal = clamp(pairForce * relAmplification, -1.0, 1.0);
-        let equilibrium = targetDist * (1.0 - socialSignal * params.softRepulsion);
-
-        let u = (dist - equilibrium) / max(0.0001, targetDist);
-
-        var springForce : f32 = 0.0;
-        var envelope : f32 = 1.0;
-        if (u < 0.0) {
-          if (params.enableHardCore != 0u) {
-            springForce = u * params.attraction * params.springStrength;
-          }
-        } else {
-          envelope = exp(-u * u);
-          if (params.enableSpringPull != 0u) {
-            springForce = u * params.attraction * params.springStrength * envelope;
-          }
-        }
-
-        var aspectForce : f32 = 0.0;
-        if (params.enableSocialForce != 0u) {
-          let rangeGate = max(0.0, 1.0 - dist / max(0.0001, radius));
-          aspectForce = socialSignal * params.attraction * rangeGate * (1.0 - envelope);
-        }
-
-        pairForce = springForce + aspectForce;
-
-        force += dir * pairForce;
-
-        seen = seen + 1u;
+        processPair(i, j, selfState.pos, selfTraits, radius, &force, &seen);
       }
+    }
+  } else {
+    // Brute force: iterate every agent, no spatial culling. Diagnostic / used
+    // when vision radius is larger than the canvas (grid is degenerate anyway).
+    // maxNeighbors cap still applies; agents are processed in index order.
+    for (var j : u32 = 0u; j < params.count; j = j + 1u) {
+      if (seen >= params.maxNeighbors) { break; }
+      processPair(i, j, selfState.pos, selfTraits, radius, &force, &seen);
     }
   }
 
@@ -1084,7 +1128,18 @@ fn simulate(@builtin(global_invocation_id) gid : vec3<u32>) {
   }
 
   var pos = selfState.pos + vel * params.dt;
-  pos = fract(pos + vec2<f32>(1.0, 1.0));
+  if (params.enableWrapX != 0u) {
+    pos.x = fract(pos.x + 1.0);
+  } else {
+    if (pos.x < 0.0) { pos.x = 0.0; vel.x = max(vel.x, 0.0); }
+    if (pos.x > 0.999999) { pos.x = 0.999999; vel.x = min(vel.x, 0.0); }
+  }
+  if (params.enableWrapY != 0u) {
+    pos.y = fract(pos.y + 1.0);
+  } else {
+    if (pos.y < 0.0) { pos.y = 0.0; vel.y = max(vel.y, 0.0); }
+    if (pos.y > 0.999999) { pos.y = 0.999999; vel.y = min(vel.y, 0.0); }
+  }
 
   dstAgents[i] = AgentState(pos, vel);
 }
@@ -1398,6 +1453,9 @@ function writeSimUniforms(dt) {
   u32[39] = CONFIG.ENABLE_SPRING_PULL ? 1 : 0;
   u32[40] = CONFIG.ENABLE_SOCIAL_FORCE ? 1 : 0;
   u32[41] = CONFIG.ENABLE_JITTER ? 1 : 0;
+  u32[42] = CONFIG.ENABLE_SPATIAL_GRID === false ? 0 : 1;
+  u32[43] = CONFIG.ENABLE_WRAP_X === false ? 0 : 1;
+  u32[44] = CONFIG.ENABLE_WRAP_Y === false ? 0 : 1;
 
   device.queue.writeBuffer(simUniformBuffer, 0, data);
 }
@@ -2160,21 +2218,48 @@ function buildPanel() {
   try {
     const rawBounds = localStorage.getItem(PANEL_BOUNDS_KEY);
     boundsStore = rawBounds ? JSON.parse(rawBounds) : {};
-  } catch (_) {
+  } catch (err) {
+    console.warn("[social-field] could not read panel bounds:", err);
     boundsStore = {};
   }
 
   const saveBoundsStore = () => {
     try {
       localStorage.setItem(PANEL_BOUNDS_KEY, JSON.stringify(boundsStore));
-    } catch (_) {}
+    } catch (err) {
+      console.warn("[social-field] could not save panel bounds:", err);
+    }
   };
+
+  let groupOpenStore = {};
+  try {
+    const rawGroups = localStorage.getItem(PANEL_GROUPS_KEY);
+    groupOpenStore = rawGroups ? JSON.parse(rawGroups) : {};
+  } catch (err) {
+    console.warn("[social-field] could not read panel group state:", err);
+    groupOpenStore = {};
+  }
+
+  const saveGroupOpenStore = () => {
+    try {
+      localStorage.setItem(PANEL_GROUPS_KEY, JSON.stringify(groupOpenStore));
+    } catch (err) {
+      console.warn("[social-field] could not save panel group state:", err);
+    }
+  };
+
+  const defaultOpenGroups = new Set(["force toggles", "forces", "world"]);
 
   for (const groupDef of PANEL_GROUPS) {
     const group = document.createElement("details");
     group.className = "group";
-    group.open = groupDef.title === "force toggles" || groupDef.title === "forces" || groupDef.title === "world";
+    const savedOpen = groupOpenStore[groupDef.title];
+    group.open = typeof savedOpen === "boolean" ? savedOpen : defaultOpenGroups.has(groupDef.title);
     group.innerHTML = `<summary>${groupDef.title}</summary>`;
+    group.addEventListener("toggle", () => {
+      groupOpenStore[groupDef.title] = group.open;
+      saveGroupOpenStore();
+    });
 
     if (groupDef.keys) {
       for (const key of groupDef.keys) {

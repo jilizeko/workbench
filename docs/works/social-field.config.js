@@ -27,6 +27,9 @@ export const DEFAULT_SOCIAL_FIELD_CONFIG = {
   ENABLE_SPRING_PULL: true,    // restoring force when d > equilibrium (returns to target)
   ENABLE_SOCIAL_FORCE: true,   // aspect-driven long-range attraction/repulsion
   ENABLE_JITTER: true,         // small per-agent random noise
+  ENABLE_SPATIAL_GRID: true,   // spatial hash grid for neighbor culling. Off = brute-force O(N²), every pair considered.
+  ENABLE_WRAP_X: true,         // toroidal wrap on the X axis. Off = agents clamp to left/right edges.
+  ENABLE_WRAP_Y: true,         // toroidal wrap on the Y axis. Off = agents clamp to top/bottom edges.
 
   // Pair-spacing geometry
   TARGET_SPACING: 1,           // (was HARD_REPULSION) center-to-center as multiple of summed radii. 1.0 = touching, 1.2 = 20% gap.
@@ -106,14 +109,6 @@ export function loadSocialFieldConfig() {
       if (!Number.isFinite(merged.AGENT_RADIUS_MIN)) merged.AGENT_RADIUS_MIN = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MIN;
       if (!Number.isFinite(merged.AGENT_RADIUS_MAX)) merged.AGENT_RADIUS_MAX = DEFAULT_SOCIAL_FIELD_CONFIG.AGENT_RADIUS_MAX;
 
-      // Legacy magnitude migration (TARGET_SPACING used to be tuned ~4, SPACING_SOFTNESS in pixels):
-      if (Number.isFinite(merged.TARGET_SPACING) && merged.TARGET_SPACING > 3) {
-        merged.TARGET_SPACING = merged.TARGET_SPACING / 4;
-      }
-      if (Number.isFinite(merged.SPACING_SOFTNESS) && merged.SPACING_SOFTNESS > 1) {
-        merged.SPACING_SOFTNESS = merged.SPACING_SOFTNESS / 100;
-      }
-
       if (!Number.isFinite(merged.TARGET_SPACING) || merged.TARGET_SPACING < 0) {
         merged.TARGET_SPACING = DEFAULT_SOCIAL_FIELD_CONFIG.TARGET_SPACING;
       }
@@ -132,12 +127,16 @@ export function loadSocialFieldConfig() {
 
       return merged;
     }
-  } catch (_) { /* ignore */ }
+  } catch (err) {
+    console.warn("[social-field] could not load config from localStorage:", err);
+  }
   return { ...DEFAULT_SOCIAL_FIELD_CONFIG };
 }
 
 export function saveSocialFieldConfig(cfg) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(cfg));
-  } catch (_) { /* ignore */ }
+  } catch (err) {
+    console.warn("[social-field] could not save config to localStorage:", err);
+  }
 }
