@@ -247,7 +247,7 @@ Note: `git add docs/registry.js` is harmless if unchanged; commit should contain
 
 ## Task 2: Create Default Clock Module Directory Without Behavior Change
 
-Status: pending
+Status: done
 
 Objective: Prepare the module boundary while keeping imports stable.
 
@@ -801,4 +801,5 @@ The refactor is complete when:
 ## Progress Log
 
 - 2026-05-29: Plan created after baseline commit `162d46f`. Task 0 implemented locally: `default-clock.js` marks `.dc-fx-canvas` with `data-capture-target="true"`; ignored script `scripts/render-capture.mjs` now prefers explicit capture canvas and writes canvas PNG via `toDataURL` to avoid Playwright element screenshot stability timeout. Verification passed: `npm run render:default-clock:still` captured poster frame and wrote a report. Committed as `fc28c67 Fix default clock capture target`.
-- 2026-05-29: Task 1 implemented locally: deleted obsolete `docs/works/time-satellite-1.js`; registry already routes `time-satellite-1` to `./works/default-clock.js?v=time-satellite-1-default-alias-1`. Verification passed: `npm run render:default-clock:still`; browser smoke passed for `/works/time-satellite-1.html?ui=0&fullscreen=1&time=2026-05-29T10:10:30.000Z` with `.dc-fx-canvas` as capture target. Active next task: commit Task 1, then Task 2.
+- 2026-05-29: Task 1 implemented locally: deleted obsolete `docs/works/time-satellite-1.js`; registry already routes `time-satellite-1` to `./works/default-clock.js?v=time-satellite-1-default-alias-1`. Verification passed: `npm run render:default-clock:still`; browser smoke passed for `/works/time-satellite-1.html?ui=0&fullscreen=1&time=2026-05-29T10:10:30.000Z` with `.dc-fx-canvas` as capture target. Committed as `78d4a0c Remove duplicate time satellite module`.
+- 2026-05-29: Task 2 implemented locally: created `docs/works/default-clock/README.md` documenting intended module boundaries. Verification passed: `npm run render:default-clock:still`. Active next task: commit Task 2, then Task 3.
