@@ -8,7 +8,8 @@ const navNext = document.getElementById("nav-next");
 const navRandom = document.getElementById("nav-random");
 const deepLink = document.getElementById("deep-link");
 
-const orderedWorks = [...works].sort((a, b) => b.order - a.order);
+const allWorks = [...works].sort((a, b) => b.order - a.order);
+const orderedWorks = allWorks.filter((work) => !work.hidden);
 let currentWork = null;
 let currentModule = null;
 
@@ -70,9 +71,14 @@ function createCaptureRuntime() {
   const parsedTime = timeValue ? Date.parse(timeValue) : Number.NaN;
   const baseTimeMs = Number.isFinite(parsedTime) ? parsedTime : null;
   const hideUi = params.get("ui") === "0";
-  const enabled = seed !== null || baseTimeMs !== null || hideUi || params.get("fullscreen") === "1";
+  const fullscreen = params.get("fullscreen") === "1";
+  const enabled = seed !== null || baseTimeMs !== null || hideUi || fullscreen;
 
   if (!enabled) return null;
+
+  if (fullscreen) {
+    document.body.classList.add("capture-fullscreen");
+  }
 
   if (hideUi) {
     document.getElementById("top-nav")?.setAttribute("hidden", "");
@@ -162,7 +168,7 @@ function getRoutePath() {
 }
 
 function getWorkBySlug(slug) {
-  return orderedWorks.find((work) => work.slug === slug) || null;
+  return allWorks.find((work) => work.slug === slug) || null;
 }
 
 function getNextWork(work) {
@@ -251,7 +257,8 @@ async function loadWork(work) {
   showArt();
 
   try {
-    const module = await import(work.script);
+    const scriptUrl = `${work.script}${work.script.includes("?") ? "&" : "?"}runtime=${Date.now()}`;
+    const module = await import(scriptUrl);
     currentModule = module;
     currentWork = work;
 

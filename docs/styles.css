@@ -121,12 +121,14 @@ a:hover {
 
 /* Fullscreen overrides */
 #shell:fullscreen,
-#shell:-webkit-full-screen {
+#shell:-webkit-full-screen,
+body.capture-fullscreen #shell {
   padding: 0;
 }
 
 #shell:fullscreen #art-container,
-#shell:-webkit-full-screen #art-container {
+#shell:-webkit-full-screen #art-container,
+body.capture-fullscreen #art-container {
   left: 0;
   right: 0;
   top: 0;
@@ -136,7 +138,9 @@ a:hover {
 #shell:fullscreen #top-nav,
 #shell:-webkit-full-screen #top-nav,
 #shell:fullscreen #bottom-nav,
-#shell:-webkit-full-screen #bottom-nav {
+#shell:-webkit-full-screen #bottom-nav,
+body.capture-fullscreen #top-nav,
+body.capture-fullscreen #bottom-nav {
   display: none;
 }
 

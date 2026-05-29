@@ -78,5 +78,26 @@ export const works = [
       date: "2026-05-13",
       description: "Autonomous agents with personal space and relationship memory form an emergent social field."
     }
+  },
+  {
+    slug: "default-clock",
+    title: "Default Clock",
+    order: 9,
+    hidden: true,
+    script: "./works/default-clock.js",
+    meta: {
+      date: "2026-05-26",
+      description: "Hidden baseline clock work used as the canonical direct-link target for modular clock experiments."
+    }
+  },
+  {
+    slug: "time-satellite-1",
+    title: "Time Satellite 1",
+    order: 10,
+    script: "./works/default-clock.js?v=time-satellite-1-default-alias-1",
+    meta: {
+      date: "2026-05-29",
+      description: "Snapshot of the modular raster clock experiment with rotating seconds trail and selectable displacement maps."
+    }
   }
 ];
