@@ -295,7 +295,7 @@ git commit -m "Document default clock module boundaries"
 
 ## Task 3: Move Config Values Into Module Directory
 
-Status: pending
+Status: done
 
 Objective: Move `default-clock.config.js` to `default-clock/config.js` and keep a compatibility re-export so existing imports do not break during refactor.
 
@@ -802,4 +802,5 @@ The refactor is complete when:
 
 - 2026-05-29: Plan created after baseline commit `162d46f`. Task 0 implemented locally: `default-clock.js` marks `.dc-fx-canvas` with `data-capture-target="true"`; ignored script `scripts/render-capture.mjs` now prefers explicit capture canvas and writes canvas PNG via `toDataURL` to avoid Playwright element screenshot stability timeout. Verification passed: `npm run render:default-clock:still` captured poster frame and wrote a report. Committed as `fc28c67 Fix default clock capture target`.
 - 2026-05-29: Task 1 implemented locally: deleted obsolete `docs/works/time-satellite-1.js`; registry already routes `time-satellite-1` to `./works/default-clock.js?v=time-satellite-1-default-alias-1`. Verification passed: `npm run render:default-clock:still`; browser smoke passed for `/works/time-satellite-1.html?ui=0&fullscreen=1&time=2026-05-29T10:10:30.000Z` with `.dc-fx-canvas` as capture target. Committed as `78d4a0c Remove duplicate time satellite module`.
-- 2026-05-29: Task 2 implemented locally: created `docs/works/default-clock/README.md` documenting intended module boundaries. Verification passed: `npm run render:default-clock:still`. Active next task: commit Task 2, then Task 3.
+- 2026-05-29: Task 2 implemented locally: created `docs/works/default-clock/README.md` documenting intended module boundaries. Verification passed: `npm run render:default-clock:still`. Committed as `116f556 Document default clock module boundaries`.
+- 2026-05-29: Task 3 implemented locally: copied full config implementation to `docs/works/default-clock/config.js` and replaced `docs/works/default-clock.config.js` with a compatibility re-export. Verification passed: `npm run render:default-clock:still`. Active next task: commit Task 3, then Task 4.
