@@ -85,7 +85,7 @@ Commit after every completed task unless the user says not to. Do not push unles
 
 ## Task 0: Fix Capture Target Selection
 
-Status: pending
+Status: done
 
 Objective: Make the render pipeline work with multi-canvas works by marking the final Default Clock canvas and teaching capture to prefer explicit targets.
 
@@ -192,7 +192,7 @@ If generated media changes are too noisy, inspect first and include only useful 
 
 ## Task 1: Remove Obsolete Time Satellite Duplicate
 
-Status: pending
+Status: done
 
 Objective: Remove the dead duplicate `docs/works/time-satellite-1.js` because registry already aliases Time Satellite to `default-clock.js`.
 
@@ -800,4 +800,5 @@ The refactor is complete when:
 
 ## Progress Log
 
-- 2026-05-29: Plan created after baseline commit `162d46f`. Task 0 implemented locally: `default-clock.js` marks `.dc-fx-canvas` with `data-capture-target="true"`; ignored script `scripts/render-capture.mjs` now prefers explicit capture canvas and writes canvas PNG via `toDataURL` to avoid Playwright element screenshot stability timeout. Verification passed: `npm run render:default-clock:still` captured poster frame and wrote a report. Active next task: commit Task 0, then Task 1.
+- 2026-05-29: Plan created after baseline commit `162d46f`. Task 0 implemented locally: `default-clock.js` marks `.dc-fx-canvas` with `data-capture-target="true"`; ignored script `scripts/render-capture.mjs` now prefers explicit capture canvas and writes canvas PNG via `toDataURL` to avoid Playwright element screenshot stability timeout. Verification passed: `npm run render:default-clock:still` captured poster frame and wrote a report. Committed as `fc28c67 Fix default clock capture target`.
+- 2026-05-29: Task 1 implemented locally: deleted obsolete `docs/works/time-satellite-1.js`; registry already routes `time-satellite-1` to `./works/default-clock.js?v=time-satellite-1-default-alias-1`. Verification passed: `npm run render:default-clock:still`; browser smoke passed for `/works/time-satellite-1.html?ui=0&fullscreen=1&time=2026-05-29T10:10:30.000Z` with `.dc-fx-canvas` as capture target. Active next task: commit Task 1, then Task 2.
