@@ -1325,6 +1325,7 @@ export function init({ container }) {
   });
   fxCanvas = document.createElement("canvas");
   fxCanvas.className = "art-canvas dc-fx-canvas";
+  fxCanvas.dataset.captureTarget = "true";
   Object.assign(fxCanvas.style, {
     position: "absolute",
     inset: "0",
