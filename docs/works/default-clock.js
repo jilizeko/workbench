@@ -35,6 +35,7 @@ const PANEL_WIDTH_KEY = "default-clock-panel-width-v2";
 const PANEL_GROUPS_KEY = "default-clock-panel-groups-v2";
 const PANEL_BOUNDS_KEY = "default-clock-panel-bounds-v2";
 
+let activeConfigSource = "default";
 const CONFIG = loadInitialConfig();
 const TWO_PI = Math.PI * 2;
 
@@ -104,15 +105,30 @@ function clearPanelState() {
 function loadInitialConfig() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("reset") === "1") {
+    activeConfigSource = "reset/default";
     clearPanelState();
     return resetDefaultClockConfig();
   }
   const portableConfig = configFromLocation();
   if (portableConfig) {
+    activeConfigSource = "url";
     saveDefaultClockConfig(portableConfig);
     return portableConfig;
   }
+  try {
+    activeConfigSource = localStorage.getItem("genart.default-clock.config") ? "localStorage" : "default";
+  } catch {
+    activeConfigSource = "default";
+  }
   return loadDefaultClockConfig();
+}
+
+function getChangedConfig(config) {
+  const changed = {};
+  for (const key of Object.keys(DEFAULT_CLOCK_CONFIG)) {
+    if (config[key] !== DEFAULT_CLOCK_CONFIG[key]) changed[key] = config[key];
+  }
+  return changed;
 }
 
 function resize() {
@@ -991,7 +1007,7 @@ function buildPanel() {
   controlsRoot.id = "dc-panel";
   controlsRoot.open = true;
   controlsRoot.innerHTML = `<summary>default-clock</summary>`;
-  controlsRoot.appendChild(Object.assign(document.createElement("div"), { className: "meta", textContent: "Space toggles panel · layered raster clock object" }));
+  controlsRoot.appendChild(Object.assign(document.createElement("div"), { className: "meta", textContent: `Space toggles panel · layered raster clock object · config source: ${activeConfigSource} · changed keys: ${Object.keys(getChangedConfig(CONFIG)).length}` }));
 
   const savedWidthRaw = localStorage.getItem(PANEL_WIDTH_KEY);
   const savedWidth = savedWidthRaw ? Number(savedWidthRaw) : 0;
@@ -1022,9 +1038,11 @@ function buildPanel() {
 
   const actions = Object.assign(document.createElement("div"), { className: "actions" });
   const btnReset = Object.assign(document.createElement("button"), { textContent: "Reset Defaults" });
-  btnReset.addEventListener("click", () => { Object.assign(CONFIG, resetDefaultClockConfig()); clearPanelState(); destroyPanel(); buildPanel(); });
+  btnReset.addEventListener("click", () => { Object.assign(CONFIG, resetDefaultClockConfig()); activeConfigSource = "reset/default"; clearPanelState(); destroyPanel(); buildPanel(); });
   const btnCopy = Object.assign(document.createElement("button"), { textContent: "Copy JSON" });
   btnCopy.addEventListener("click", async () => { try { await navigator.clipboard.writeText(JSON.stringify(CONFIG, null, 2)); } catch {} });
+  const btnCopyChanged = Object.assign(document.createElement("button"), { textContent: "Copy Changed" });
+  btnCopyChanged.addEventListener("click", async () => { try { await navigator.clipboard.writeText(JSON.stringify(getChangedConfig(CONFIG), null, 2)); } catch {} });
   const btnCopyUrl = Object.assign(document.createElement("button"), { textContent: "Copy URL" });
   btnCopyUrl.addEventListener("click", async () => {
     try {
@@ -1035,7 +1053,7 @@ function buildPanel() {
       await navigator.clipboard.writeText(url.toString());
     } catch {}
   });
-  actions.append(btnReset, btnCopy, btnCopyUrl);
+  actions.append(btnReset, btnCopy, btnCopyChanged, btnCopyUrl);
   controlsRoot.appendChild(actions);
   document.body.appendChild(controlsRoot);
 }
