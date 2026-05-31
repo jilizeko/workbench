@@ -30,13 +30,13 @@ let controlsStyle;
 let width = 0;
 let height = 0;
 
-const CONFIG = loadDefaultClockConfig();
-const TWO_PI = Math.PI * 2;
-
 // v2 keys intentionally ignore the old tiny author panel width/group state.
 const PANEL_WIDTH_KEY = "default-clock-panel-width-v2";
 const PANEL_GROUPS_KEY = "default-clock-panel-groups-v2";
 const PANEL_BOUNDS_KEY = "default-clock-panel-bounds-v2";
+
+const CONFIG = loadInitialConfig();
+const TWO_PI = Math.PI * 2;
 
 const COLOR_KEYS = new Set(Object.keys(DEFAULT_CLOCK_CONFIG).filter((key) => key.endsWith("_COLOR") || key.endsWith("_TINT") || key.startsWith("BG_")));
 const BOOL_KEYS = new Set(Object.keys(DEFAULT_CLOCK_CONFIG).filter((key) => typeof DEFAULT_CLOCK_CONFIG[key] === "boolean"));
@@ -53,6 +53,67 @@ function hexToRgba(hex, alpha = 1) {
 function readJsonStore(key, fallback = {}) { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch { return fallback; } }
 function writeJsonStore(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 function saveConfig() { saveDefaultClockConfig(CONFIG); }
+
+function sanitizePortableConfig(raw) {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_CLOCK_CONFIG };
+  const next = { ...DEFAULT_CLOCK_CONFIG };
+  for (const [key, defaultValue] of Object.entries(DEFAULT_CLOCK_CONFIG)) {
+    const candidate = raw[key];
+    if (typeof defaultValue === "number" && typeof candidate === "number" && Number.isFinite(candidate)) next[key] = candidate;
+    if (typeof defaultValue === "string" && typeof candidate === "string") next[key] = candidate;
+    if (typeof defaultValue === "boolean" && typeof candidate === "boolean") next[key] = candidate;
+  }
+  return next;
+}
+
+function encodePortableConfig(config) {
+  const json = JSON.stringify(sanitizePortableConfig(config));
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodePortableConfig(value) {
+  if (!value) return null;
+  try {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return sanitizePortableConfig(JSON.parse(new TextDecoder().decode(bytes)));
+  } catch {
+    return null;
+  }
+}
+
+function configFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+  const hashParams = new URLSearchParams(hash);
+  return decodePortableConfig(params.get("config") || hashParams.get("config"));
+}
+
+function clearPanelState() {
+  try {
+    localStorage.removeItem(PANEL_WIDTH_KEY);
+    localStorage.removeItem(PANEL_GROUPS_KEY);
+    localStorage.removeItem(PANEL_BOUNDS_KEY);
+  } catch {}
+}
+
+function loadInitialConfig() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset") === "1") {
+    clearPanelState();
+    return resetDefaultClockConfig();
+  }
+  const portableConfig = configFromLocation();
+  if (portableConfig) {
+    saveDefaultClockConfig(portableConfig);
+    return portableConfig;
+  }
+  return loadDefaultClockConfig();
+}
 
 function resize() {
   const rect = cameraPlane.getBoundingClientRect();
@@ -961,10 +1022,20 @@ function buildPanel() {
 
   const actions = Object.assign(document.createElement("div"), { className: "actions" });
   const btnReset = Object.assign(document.createElement("button"), { textContent: "Reset Defaults" });
-  btnReset.addEventListener("click", () => { Object.assign(CONFIG, resetDefaultClockConfig()); destroyPanel(); buildPanel(); });
+  btnReset.addEventListener("click", () => { Object.assign(CONFIG, resetDefaultClockConfig()); clearPanelState(); destroyPanel(); buildPanel(); });
   const btnCopy = Object.assign(document.createElement("button"), { textContent: "Copy JSON" });
   btnCopy.addEventListener("click", async () => { try { await navigator.clipboard.writeText(JSON.stringify(CONFIG, null, 2)); } catch {} });
-  actions.append(btnReset, btnCopy);
+  const btnCopyUrl = Object.assign(document.createElement("button"), { textContent: "Copy URL" });
+  btnCopyUrl.addEventListener("click", async () => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("reset");
+      url.searchParams.delete("config");
+      url.hash = `config=${encodePortableConfig(CONFIG)}`;
+      await navigator.clipboard.writeText(url.toString());
+    } catch {}
+  });
+  actions.append(btnReset, btnCopy, btnCopyUrl);
   controlsRoot.appendChild(actions);
   document.body.appendChild(controlsRoot);
 }
